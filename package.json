@@ -1,0 +1,16 @@
+{
+  "name": "writehaven",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Writehaven: a live writing party (editor, live public page, host dashboard)",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "qa": "node tools/qa-e2e.mjs"
+  }
+}

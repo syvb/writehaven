@@ -1,0 +1,20 @@
+/* The harness's stand-in page (not the help sheet: that is app.css's help section). */
+.hh-page { min-height: 100vh; display: flex; flex-direction: column; }
+.hh-top { display: flex; align-items: center; gap: 1.5rem; height: 3rem; padding: 0 1.25rem; border-bottom: 1px solid var(--rule-2); font: 500 0.85rem var(--sans); color: var(--ink-2); }
+.hh-brand { font: italic 400 1.05rem var(--serif); color: var(--ink); }
+.hh-tab { padding: 0.9rem 0.2rem; border-bottom: 2px solid var(--ink); color: var(--ink); }
+.hh-me { margin-left: auto; }
+.hh-sheet { flex: 1; width: min(42rem, 100% - 2.3rem); margin: 0 auto; padding: 3rem 0; font: 400 1.25rem/1.65 var(--serif); }
+.hh-title { margin: 0 0 0.6rem; font: 600 2.6rem/1.12 var(--serif); letter-spacing: -0.02em; }
+.hh-chips { display: flex; align-items: center; gap: 0.45rem; font: 500 0.82rem var(--sans); color: var(--ink-3); }
+.hh-gap { width: 1rem; }
+.hh-open { margin-top: 2rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.hh-waiting { margin: 2rem 0; padding: 1.2rem 1.4rem; border: 1px solid var(--rule); border-radius: 10px; background: var(--sheet); font-size: 1rem; }
+.hh-waiting h2 { margin: 0 0 0.6rem; font: 500 1.3rem var(--serif); }
+.hh-waiting ol { margin: 0; padding-left: 1.2rem; }
+.hh-foot { display: flex; align-items: center; gap: 0.8rem; height: 2.6rem; padding: 0 1.25rem; border-top: 1px solid var(--rule-2); font: 450 0.82rem var(--sans); color: var(--ink-2); }
+.hh-strip { display: inline-flex; gap: 3px; }
+.hh-bar { position: relative; width: 8.5rem; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+.hh-bar i { position: absolute; inset: 0 auto 0 0; width: 45%; background: var(--accent); }
+.hh-save { margin-left: auto; color: var(--ink-3); }
+@media (max-width: 760px) { .hh-tab, .hh-brand { display: none; } .hh-sheet { padding-top: 1.5rem; } .hh-title { font-size: 1.9rem; } }

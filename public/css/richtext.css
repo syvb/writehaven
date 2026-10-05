@@ -1,0 +1,246 @@
+/* Rich text in the writer's editor (SPEC §14): the formatting bar (floating on desktop, docked
+   above the keyboard on phones), link and image popovers, inline images and upload placeholders.
+   Loaded by richtext.js; built on the tokens in app.css. */
+
+.rt-file { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* ---------------------------------------------------------------- buttons and icons */
+.rt-btn {
+  display: inline-grid; place-items: center; flex: none; padding: 0; border: 0; background: transparent;
+  color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.rt-btn:disabled { cursor: default; }
+.rt-btn svg, .rt-pop-btn svg, .rt-chev svg {
+  width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; overflow: visible;
+}
+.rt-btn svg .f { fill: currentColor; stroke: none; }
+.rt-btn svg .t { stroke-width: 1.4; }
+.rt-btn svg .q { stroke-width: 1.7; }
+.rt-glyph { display: block; font-family: var(--serif); font-size: 19px; line-height: 1; font-variant-numeric: lining-nums; }
+.rt-g-b { font-weight: 700; }
+.rt-g-i { font-style: italic; font-weight: 500; font-size: 20px; }
+.rt-g-h { font-weight: 600; }
+.rt-g-h sub { font: 650 10px/1 var(--sans); vertical-align: -0.1em; margin-left: 1px; }
+.rt-sep { flex: none; width: 1px; height: 18px; margin: 0 3px; }
+
+/* ---------------------------------------------------------------- desktop: above the selection */
+/* Above the page's banners (the notifications ask is z-index 58): the bar answers a selection. */
+.rt-float {
+  position: fixed; left: 0; top: 0; z-index: 59;
+  display: flex; align-items: center; gap: 1px; padding: 4px;
+  border-radius: 9px; background: var(--ink); color: var(--paper);
+  box-shadow: 0 1px 2px rgba(20, 22, 26, 0.2), 0 14px 30px -12px rgba(20, 22, 26, 0.55);
+  will-change: transform;
+}
+.rt-float.is-in { animation: rt-fade 0.12s ease-out; }
+@keyframes rt-fade { from { opacity: 0; } }
+.rt-float .rt-btn { width: 32px; height: 32px; border-radius: 6px; opacity: 0.78; transition: opacity 0.1s, background-color 0.1s; }
+.rt-float .rt-btn:hover { opacity: 1; background: color-mix(in srgb, var(--paper) 13%, transparent); }
+.rt-float .rt-btn[aria-pressed='true'] { opacity: 1; background: color-mix(in srgb, var(--paper) 22%, transparent); }
+.rt-float .rt-btn:disabled { opacity: 0.28; background: none; }
+.rt-float .rt-btn:focus-visible { outline: 2px solid var(--paper); outline-offset: -2px; }
+.rt-float .rt-sep { background: color-mix(in srgb, var(--paper) 22%, transparent); }
+
+/* Desktop, beside an empty line: add an image. */
+.rt-insert {
+  position: fixed; left: 0; top: 0; z-index: 40; display: grid; place-items: center;
+  width: 30px; height: 30px; padding: 0; border: 1px solid var(--rule); border-radius: 50%;
+  background: var(--sheet); color: var(--ink-3); cursor: pointer; animation: rt-fade 0.25s ease-out;
+}
+.rt-insert:hover { color: var(--accent); border-color: var(--accent); }
+.rt-insert svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------------------------------------------------------------- phones: above the keyboard
+   The bar is a row of its own in the writer's page grid, under the footer, so the text area
+   just gets shorter: it never covers the caret line or the footer. */
+.rt-dock {
+  grid-row: -1; /* a row of its own after the footer (never an empty row above it) */
+  position: relative; display: flex; align-items: stretch; min-width: 0;
+  border-top: 1px solid var(--rule-2); background: var(--paper);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.rt-dock.is-kb { padding-bottom: 0; }
+.rt-dock.is-fixed { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; }
+.rt-dock-scroll {
+  flex: 1; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+.rt-dock-scroll::-webkit-scrollbar { display: none; }
+.rt-dock-tools { display: flex; align-items: center; width: max-content; padding: 0 20px 0 4px; }
+.rt-dock .rt-btn { width: 44px; height: 44px; border-radius: 8px; color: var(--ink-2); scroll-snap-align: start; }
+.rt-dock .rt-btn:active { background: var(--accent-wash); }
+.rt-dock .rt-btn[aria-pressed='true'] { color: var(--accent); background: var(--accent-wash); }
+.rt-dock .rt-btn:disabled { color: var(--ink-3); opacity: 0.4; }
+.rt-dock .rt-sep { height: 22px; margin: 0 4px; background: var(--rule); }
+.rt-chev {
+  flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border: 0; border-left: 1px solid var(--rule-2); background: var(--paper); color: var(--ink-3); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rt-chev:disabled { opacity: 0.35; }
+/* Hidden with the chevron: a small tab on the footer's top edge brings it back. The footer keeps
+   its full width (the count never gets cut), and the editor keeps the caret clear of the tab. */
+.rt-dock.is-collapsed { height: 0; border-top: 0; padding: 0; }
+.rt-dock.is-collapsed .rt-dock-scroll { display: none; }
+.rt-dock.is-collapsed .rt-chev {
+  position: absolute; right: 10px; bottom: var(--rt-foot-h, 2.6rem); width: 50px; height: 26px;
+  border: 1px solid var(--rule-2); border-bottom: 0; border-radius: 9px 9px 0 0;
+  background: var(--paper); color: var(--ink-2);
+}
+.rt-dock.is-collapsed .rt-chev::after { content: ''; position: absolute; inset: -12px -4px -8px; } /* a 44 px target */
+.rt-dock.is-collapsed .rt-chev svg { width: 18px; height: 18px; }
+.w-app.rt-docked .w-foot { padding-bottom: 0; }
+
+/* ---------------------------------------------------------------- popovers and sheets */
+.rt-pop {
+  position: fixed; left: 0; top: 0; z-index: 59;
+  background: var(--sheet); color: var(--ink); border: 1px solid var(--rule); border-radius: 9px;
+  box-shadow: var(--shadow); font: 450 0.875rem/1.35 var(--sans);
+  animation: rt-fade 0.12s ease-out;
+}
+.rt-pop.is-sheet {
+  border-width: 1px 0 0; border-radius: 14px 14px 0 0;
+  box-shadow: 0 -14px 34px -20px rgba(20, 22, 26, 0.45);
+}
+.rt-pop-row { display: flex; align-items: center; gap: 2px; max-width: min(32rem, calc(100vw - 16px)); padding: 4px 4px 4px 12px; }
+.rt-pop-url {
+  min-width: 0; max-width: 17rem; margin-right: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--accent); text-decoration: none; font-weight: 500;
+}
+.rt-pop-url:hover { text-decoration: underline; text-underline-offset: 0.18em; }
+.rt-pop-acts { display: flex; flex: none; align-items: center; gap: 2px; padding-left: 4px; border-left: 1px solid var(--rule-2); }
+.rt-pop-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem; min-height: 2rem; padding: 0 0.6rem;
+  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  font: 550 0.82rem/1 var(--sans); color: var(--ink-2); white-space: nowrap;
+}
+.rt-pop-btn:hover { background: var(--accent-wash); color: var(--ink); }
+.rt-pop-btn svg { width: 14px; height: 14px; stroke-width: 1.8; }
+
+.rt-form { width: min(24rem, calc(100vw - 16px)); padding: 1rem 1.1rem 0.9rem; }
+.is-sheet .rt-form { width: auto; max-width: 36rem; margin: 0 auto; padding: 1.1rem 1.15rem calc(0.8rem + env(safe-area-inset-bottom)); }
+.rt-form-title { margin: 0 0 0.75rem; font: 500 1.2rem/1.25 var(--serif); letter-spacing: -0.005em; color: var(--ink); }
+.rt-form-note { margin: -0.45rem 0 0; font: 400 0.8rem/1.45 var(--sans); color: var(--ink-3); }
+.rt-field { display: grid; gap: 0.3rem; margin-bottom: 0.75rem; }
+.rt-field-label { font: 600 0.78rem var(--sans); color: var(--ink-2); }
+.rt-field-hint { font: 400 0.76rem/1.4 var(--sans); color: var(--ink-3); }
+.rt-input {
+  width: 100%; padding: 0.6rem 0.7rem; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--paper); color: var(--ink); font: 400 max(16px, 0.95rem) var(--sans);
+}
+.rt-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-wash); }
+.rt-input[aria-invalid='true'] { border-color: var(--miss); box-shadow: 0 0 0 3px var(--miss-wash); }
+.rt-form-err { margin: -0.35rem 0 0.7rem; font: 500 0.8rem/1.4 var(--sans); color: var(--miss); }
+.rt-form-err:empty { display: none; }
+.rt-form-actions { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.15rem; }
+.rt-grow { flex: 1; }
+.rt-form-remove { color: var(--miss); padding-left: 0.45rem; padding-right: 0.45rem; }
+.rt-form-remove:hover { background: var(--miss-wash); color: var(--miss); }
+.rt-form-image-head { display: flex; align-items: flex-start; gap: 0.85rem; margin-bottom: 0.9rem; }
+.rt-form-image-head .rt-form-title { margin-bottom: 0.5rem; }
+.rt-form-image-head .rt-form-note { margin: 0; }
+.rt-form-thumb { flex: none; width: 4.25rem; height: 4.25rem; object-fit: cover; border-radius: 4px; background: var(--rule-2); }
+
+/* ---------------------------------------------------------------- links in the text */
+.w-editor .rt-url,
+.w-editor .rt-url .cm-tok-url,
+.w-editor .cm-tok-url:has(> .rt-url) {
+  color: var(--accent); font-size: inherit;
+  text-decoration: underline; text-decoration-color: var(--accent-wash-2); text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+/* The caret inside a link's text (typing goes into the link): the text is lit. Just outside it,
+   at the same spot on screen, it isn't. */
+.w-editor .rt-link-in {
+  background: var(--accent-wash); border-radius: 2px;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+
+/* ---------------------------------------------------------------- images in the text */
+/* An inline block, so the link styling CodeMirror gives the image's source never underlines it. */
+.rt-img {
+  display: inline-block; width: 100%; vertical-align: top; margin: 0.4em 0 0.15em; text-align: center; text-indent: 0;
+  font-style: normal; text-decoration: none; cursor: pointer; user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.rt-img img {
+  display: block; margin: 0 auto; max-width: 100%; height: auto;
+  border-radius: 2px; background: var(--rule-2); transition: box-shadow 0.15s;
+}
+.rt-img:hover img { box-shadow: 0 0 0 1px var(--rule); }
+.rt-img.is-active img { box-shadow: 0 0 0 2px var(--sheet), 0 0 0 4px var(--accent); }
+.rt-img-cap {
+  display: block; margin: 0.5em auto 0; max-width: 32em;
+  font: italic 400 0.8em/1.4 var(--serif); color: var(--ink-3); text-wrap: balance;
+}
+.rt-img-cap.is-empty { opacity: 0.7; text-decoration: underline dotted var(--rule); text-underline-offset: 0.25em; }
+.rt-img:hover .rt-img-cap.is-empty { opacity: 1; }
+
+/* ---------------------------------------------------------------- footnotes (SPEC §31) */
+.w-editor .rt-fn-ref {
+  margin: 0 0.02em 0 0; padding: 0 0.04em; border-radius: 3px;
+  font: 600 0.62em/0 var(--sans); vertical-align: super; letter-spacing: 0.02em;
+  font-variant-numeric: lining-nums tabular-nums; color: var(--accent); cursor: pointer;
+}
+.w-editor .rt-fn-ref:hover { background: var(--accent-wash); }
+.w-editor .rt-fn-mark { font-size: 0.8em; color: var(--ink-3); font-family: var(--sans); font-style: normal; }
+/* Notes: smaller and quieter; the first of a run gets a hairline above it. */
+.w-editor .cm-line.rt-fn-def { font-size: 0.84em; line-height: 1.55; color: var(--ink-2); }
+.w-editor .cm-line.rt-fn-first { padding-top: 0.9em !important; background: linear-gradient(var(--rule), var(--rule)) 0 0.35em / 4.5em 1px no-repeat; }
+.w-editor .rt-fn-def .cm-tok-url { color: inherit; font-size: inherit; }
+.w-editor .rt-fn-num {
+  display: inline-block; min-width: 1.4em; margin-right: 0.35em; padding: 0 0.15em; border-radius: 3px;
+  font: 600 0.82em/1.2 var(--sans); font-variant-numeric: lining-nums tabular-nums; color: var(--accent);
+  cursor: pointer;
+}
+.w-editor .rt-fn-num::after { content: '.'; }
+.w-editor .rt-fn-num:hover { background: var(--accent-wash); }
+.w-editor .rt-fn-num.is-unused { color: var(--ink-3); cursor: default; }
+.w-editor .rt-fn-num.is-unused::after { content: ':'; }
+/* "Put notes in order", above notes that aren't in order: a quiet link-like button (.rt-up-btn). */
+.w-editor .rt-fn-order { display: flex; justify-content: flex-end; margin: 0.5em 0 -0.5em; }
+.w-editor .cm-content[contenteditable="false"] .rt-fn-order { display: none; }
+.rt-g-fn { font-size: 18px; }
+.rt-g-fn sup { font: 650 10px/1 var(--sans); vertical-align: 0.55em; margin-left: 1px; }
+
+/* ---------------------------------------------------------------- uploads in progress */
+.rt-up { display: block; padding: 0.55em 0 0.35em; font-family: var(--sans); text-align: center; }
+.rt-up-frame {
+  position: relative; display: block; margin: 0 auto; max-width: 100%; aspect-ratio: 3 / 2;
+  border-radius: 2px; overflow: hidden; background: var(--rule-2);
+}
+.rt-up-frame img { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0.55; transition: opacity 0.3s; }
+.rt-up.is-done .rt-up-frame img { opacity: 1; }
+.rt-up.is-processing .rt-up-frame { animation: rt-breathe 1.6s ease-in-out infinite; }
+@keyframes rt-breathe { 50% { opacity: 0.6; } }
+.rt-up-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--sheet) 55%, transparent); }
+.rt-up-bar i { display: block; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform 0.25s ease-out; }
+.rt-up.is-waiting .rt-up-bar, .rt-up.is-error .rt-up-bar, .rt-up.is-processing .rt-up-bar { display: none; }
+.rt-up-cap {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 0.2rem 0.75rem;
+  margin-top: 0.55em; font: 500 0.8rem/1.4 var(--sans); color: var(--ink-3);
+}
+.rt-up.is-waiting .rt-up-text { color: var(--warn); }
+.rt-up.is-error .rt-up-text { color: var(--miss); }
+.rt-up-acts { display: inline-flex; gap: 0.25rem; }
+.rt-up-btn {
+  padding: 0.15rem 0.35rem; border: 0; border-radius: 4px; background: none; cursor: pointer;
+  font: 600 0.8rem/1.4 var(--sans); color: var(--accent); text-decoration: underline; text-underline-offset: 0.2em;
+}
+.rt-up-btn:hover { background: var(--accent-wash); }
+
+@media (hover: none) and (pointer: coarse) {
+  .rt-pop-btn { min-height: 44px; padding: 0 0.8rem; font-size: 0.9rem; }
+  .rt-pop-row { padding: 2px 2px 2px 12px; }
+  .rt-up-btn { min-height: 44px; padding: 0 0.6rem; }
+  .rt-form-actions .btn { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rt-float.is-in, .rt-pop, .rt-up.is-processing .rt-up-frame { animation: none; }
+}
+@media print {
+  .rt-float, .rt-dock, .rt-pop, .rt-up, .rt-insert { display: none !important; }
+}

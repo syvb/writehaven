@@ -1,0 +1,278 @@
+/*
+ * Writehaven print view (PDF export).
+ * interop.js renders the post(s) into <div id="wh-print"> and adds .wh-printing to <html>;
+ * while printing, everything else on the page is hidden. Faces come from /fonts/fonts.css.
+ */
+
+#wh-print { display: none; }
+
+@media print {
+  @page {
+    size: auto;
+    margin: 20mm 18mm 22mm;
+    @bottom-center {
+      content: counter(page);
+      font-family: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 8pt;
+      letter-spacing: 0.08em;
+      color: #6b6f73;
+    }
+  }
+  @page :first {
+    @bottom-center { content: none; }
+  }
+
+  html.wh-printing,
+  html.wh-printing body {
+    background: #fff !important;
+    color: #1a1c1e !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    display: block !important;
+    color-scheme: light !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  html.wh-printing body > *:not(#wh-print) { display: none !important; }
+  html.wh-printing body::before,
+  html.wh-printing body::after { display: none !important; content: none !important; }
+
+  html.wh-printing #wh-print {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+
+  #wh-print .wh-doc {
+    max-width: 30em;
+    margin: 0 auto;
+    padding: 0;
+    color: #1a1c1e;
+    background: #fff;
+    font-family: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 12pt;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.52;
+    letter-spacing: normal;
+    text-align: left;
+    font-variant-numeric: oldstyle-nums proportional-nums;
+    font-kerning: normal;
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    hanging-punctuation: first allow-end;
+    overflow-wrap: break-word;
+    orphans: 3;
+    widows: 3;
+  }
+  #wh-print .wh-doc * { box-shadow: none !important; text-shadow: none !important; }
+
+  /* Posts: each one starts on a new page in multi-post mode. */
+  #wh-print .post { display: block; margin: 0; padding: 0; border: 0; background: none; }
+  #wh-print .post + .post { break-before: page; page-break-before: always; }
+  #wh-print .post-title {
+    font-family: inherit;
+    font-size: 28pt;
+    font-weight: 300;
+    font-style: normal;
+    line-height: 1.08;
+    letter-spacing: -0.016em;
+    color: #1a1c1e;
+    text-transform: none;
+    margin: 0 0 1.25em;
+    padding: 0;
+    border: 0;
+    text-wrap: balance;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Title page for "all my posts". */
+  #wh-print .titlepage {
+    display: block;
+    margin: 0;
+    padding: 34vh 0 0;
+    break-after: page;
+    page-break-after: always;
+  }
+  #wh-print .book-title {
+    font-family: inherit;
+    font-size: 34pt;
+    font-weight: 300;
+    font-style: normal;
+    text-transform: none;
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    color: #1a1c1e;
+    margin: 0 0 0.5em;
+    padding: 0;
+    border: 0;
+    text-wrap: balance;
+  }
+  #wh-print .book-meta {
+    font-family: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 7.5pt;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #6b6f73;
+    margin: 0 0 4em;
+    font-variant-numeric: lining-nums;
+  }
+  #wh-print .contents h2 {
+    font-family: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #6b6f73;
+    margin: 0 0 1.1em;
+    padding: 0;
+    border: 0;
+  }
+  #wh-print .contents ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+  #wh-print .contents li {
+    counter-increment: toc;
+    display: flex;
+    gap: 1em;
+    align-items: baseline;
+    margin: 0.4em 0;
+    padding: 0;
+  }
+  #wh-print .contents li::marker { content: none; }
+  #wh-print .contents li::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 7.5pt;
+    letter-spacing: 0.06em;
+    color: #2b4c7e;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  #wh-print .contents a { color: inherit; text-decoration: none; }
+
+  /* Text. */
+  #wh-print p { margin: 0 0 0.85em; padding: 0; text-indent: 0; font-size: 1em; color: inherit; }
+  #wh-print h2, #wh-print h3, #wh-print h4, #wh-print h5, #wh-print h6 {
+    font-family: inherit;
+    color: #1a1c1e;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.22;
+    letter-spacing: normal;
+    text-transform: none;
+    margin: 1.7em 0 0.55em;
+    padding: 0;
+    border: 0;
+    break-after: avoid;
+    page-break-after: avoid;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #wh-print h2 { font-size: 17pt; letter-spacing: -0.008em; }
+  #wh-print h3 { font-size: 14pt; font-style: italic; }
+  #wh-print h4 { font-size: 12pt; font-weight: 600; }
+  #wh-print h5, #wh-print h6 {
+    font-family: "Instrument Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 7.5pt;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+  }
+  #wh-print strong, #wh-print b { font-weight: 600; }
+  #wh-print em, #wh-print i { font-style: italic; }
+  #wh-print a { color: #2b4c7e; text-decoration: none; }
+  #wh-print del, #wh-print s { text-decoration: line-through; }
+
+  #wh-print blockquote {
+    margin: 1.3em 0;
+    padding: 0 0 0 1.15em;
+    border: 0;
+    border-left: 0.6pt solid #2b4c7e;
+    background: none;
+    color: #2f3337;
+    font-style: normal;
+    quotes: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #wh-print blockquote::before, #wh-print blockquote::after { content: none; }
+  #wh-print blockquote p:last-child { margin-bottom: 0; }
+
+  #wh-print ul, #wh-print ol { margin: 0 0 0.85em; padding: 0 0 0 1.35em; list-style-position: outside; }
+  #wh-print ul { list-style-type: disc; }
+  #wh-print ol { list-style-type: decimal; }
+  #wh-print li { margin: 0.25em 0; padding: 0 0 0 0.2em; }
+  #wh-print li::marker { color: #2b4c7e; }
+  #wh-print li > ul, #wh-print li > ol { margin: 0.25em 0 0; }
+
+  #wh-print code {
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.82em;
+    background: #f3f1ec;
+    border-radius: 2px;
+    padding: 0.05em 0.3em;
+    color: inherit;
+  }
+  #wh-print pre {
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 8.6pt;
+    line-height: 1.5;
+    background: #f6f4ef;
+    color: #1a1c1e;
+    border: 0;
+    border-radius: 3px;
+    padding: 0.8em 1em;
+    margin: 1.2em 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #wh-print pre code { background: none; padding: 0; font-size: inherit; border-radius: 0; }
+
+  #wh-print hr {
+    border: 0;
+    height: auto;
+    margin: 2em 0;
+    background: none;
+    text-align: center;
+    overflow: visible;
+  }
+  #wh-print hr::before {
+    content: "*\2003*\2003*";
+    color: #2b4c7e;
+    font-size: 10pt;
+  }
+
+  #wh-print .table-wrap { margin: 1.3em 0; }
+  #wh-print table {
+    border-collapse: collapse;
+    margin: 1.3em 0;
+    font-size: 9.5pt;
+    line-height: 1.4;
+    font-variant-numeric: lining-nums tabular-nums;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #wh-print th, #wh-print td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.4em 1em 0.4em 0;
+    border: 0;
+    border-bottom: 0.5pt solid #d9d5cc;
+    background: none;
+  }
+  #wh-print th { font-weight: 600; border-bottom: 0.75pt solid #1a1c1e; }
+}

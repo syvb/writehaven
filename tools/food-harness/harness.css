@@ -1,0 +1,14 @@
+/* Stand-ins for the app's screens around the food components (dev only). */
+.fh-writer { min-height: 100dvh; }
+.fh-top { display: flex; align-items: center; gap: 1.5rem; padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--rule-2); font: 500 0.88rem var(--sans); }
+.fh-brand { font: italic 400 1.15rem var(--serif); }
+.fh-me { margin-left: auto; }
+.fh-lobby { max-width: 40rem; margin: 3rem auto; padding: 0 1.25rem; }
+.fh-lobby h1 { margin: 0 0 0.6rem; font: 400 2.4rem/1.1 var(--serif); letter-spacing: -0.02em; }
+.fh-lobby p { font: 400 1.1rem/1.55 var(--serif); color: var(--ink-2); }
+.fh-host { max-width: 110rem; margin: 0 auto; padding: 1rem clamp(0.75rem, 2vw, 1.75rem) 4rem; }
+.fh-host-top { padding: 0.4rem 0 1rem; margin-bottom: 1.2rem; border-bottom: 1px solid var(--rule); font: 400 2rem var(--serif); }
+.fh-host-grid { display: grid; grid-template-columns: minmax(0, 1fr) 23rem; gap: 1.2rem; align-items: start; }
+.fh-host-grid.is-narrow { grid-template-columns: 23rem minmax(0, 1fr); }
+.fh-side { padding: 1rem 1.1rem; border: 1px dashed var(--rule); border-radius: 8px; color: var(--ink-3); font: 450 0.85rem var(--sans); }
+@media (max-width: 1100px) { .fh-host-grid, .fh-host-grid.is-narrow { grid-template-columns: minmax(0, 1fr); } }

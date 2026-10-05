@@ -1,0 +1,11 @@
+/* Deliberately hostile app-like styles: the print view must override all of them. */
+html, body { height: 100%; overflow: hidden; margin: 0; }
+body { background: #15171a; color: #e6e1d8; font-family: "Instrument Sans", sans-serif; display: grid; grid-template-rows: auto 1fr; }
+body::before { content: ""; position: fixed; inset: 0; background: rgba(255, 255, 255, 0.03); pointer-events: none; }
+h1, h2, h3 { font-family: "Instrument Sans", sans-serif; color: #f6c177; text-transform: uppercase; }
+p { margin: 0; color: #e6e1d8; }
+blockquote { border-left: 6px solid red; background: #222; font-style: italic; }
+a { color: hotpink; }
+.bar { padding: 12px 20px; border-bottom: 1px solid #333; }
+.editor { padding: 40px; }
+.toast { position: fixed; bottom: 20px; right: 20px; background: #333; padding: 10px 16px; border-radius: 8px; }

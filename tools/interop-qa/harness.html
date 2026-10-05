@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writehaven app (interop harness)</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<link rel="stylesheet" href="/css/print.css?v=qa" media="print">
+<link rel="stylesheet" href="/qa/harness.css">
+<script src="/qa/fuzz.js"></script>
+<script type="module" src="/qa/harness.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="bar">Writehaven · harness</header>
+  <main class="editor">
+    <h1>App chrome that must not appear in print</h1>
+    <p>This stands in for the editor, tabs and progress UI. The page is dark, fixed-height and
+      overflow-hidden on purpose, like an app shell, to prove the print view resets all of that.</p>
+  </main>
+</div>
+<div class="toast">A toast that must not print</div>
+</body>
+</html>
