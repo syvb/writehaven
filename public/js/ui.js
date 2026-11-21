@@ -37,6 +37,14 @@ const timeFmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-d
 export function fmtTime(ms) {
   return timeFmt.format(ms);
 }
+// A time that may not be today: "12:00", "tomorrow at 12:00" or "Sun 22 Nov at 12:00".
+export function fmtWhen(ms, nowMs = Date.now()) {
+  const day = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const days = Math.round((day(ms) - day(nowMs)) / 86_400_000);
+  if (days === 0) return timeFmt.format(ms);
+  if (days === 1) return `tomorrow at ${timeFmt.format(ms)}`;
+  return `${new Date(ms).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} at ${timeFmt.format(ms)}`;
+}
 export function fmtDur(ms) {
   if (ms < 60_000) return 'under a minute';
   const m = Math.max(0, Math.round(ms / 60000));

@@ -1,6 +1,6 @@
 // Router: one page shell, a screen per path.
 
-import { h, fill, clear, applyTheme, toast, helpLink } from './ui.js';
+import { h, fill, clear, applyTheme, toast, helpLink, fmtWhen } from './ui.js';
 import { api, stream, forgetSession } from './net.js';
 
 applyTheme();
@@ -312,7 +312,7 @@ function mountRejoin(root, session, onJoined) {
       toast(e.network ? 'You seem to be offline. Try again when you’re back.' : e.message || 'Couldn’t join. Try again.', { kind: 'error' });
     }
   });
-  const when = p.phase === 'running' ? `Round ${round} is on now.` : p.phase === 'ended' ? `Round ${round} has ended.` : `Round ${round} hasn’t started yet.`;
+  const when = p.phase === 'running' ? `Round ${round} is on now.` : p.phase === 'ended' ? `Round ${round} has ended.` : Number.isFinite(p.plannedStart) ? `Round ${round} starts ${fmtWhen(p.plannedStart)}.` : `Round ${round} hasn’t started yet.`;
   const lede = p.phase === 'ended'
     ? `${when} Join it to add posts after the party.`
     : `${when} Join it to write in it: until you do, you’re not one of its writers.${p.phase === 'running' ? ' Your first hour starts when you start writing.' : ''}`;

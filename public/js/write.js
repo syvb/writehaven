@@ -1,6 +1,6 @@
 // The writer's room: post tabs, the editor, planning notes, progress.
 
-import { h, fill, $, clear, toast, modal, confirmDialog, menu, fmtInt, fmtDur, plural, debounce, getTheme, setTheme, helpLink } from './ui.js';
+import { h, fill, $, clear, toast, modal, confirmDialog, menu, fmtInt, fmtDur, fmtWhen, plural, debounce, getTheme, setTheme, helpLink } from './ui.js';
 import { api, stream, forgetSession } from './net.js';
 import { SyncManager, loadBoot, clearBoot } from './sync.js';
 import { createEditor, setSmartPunctuation, smartPunctuation, countedWords, PasteMeta } from './editor.js';
@@ -1165,8 +1165,8 @@ export async function mountWriter(root, session) {
       empty.hidden = false;
       fill(empty, 
         h('h1', null, me.party.name),
-        h('p', { class: 'w-empty-lede' }, 'The party hasn’t started yet.'),
-        h('p', null, 'This page opens for writing the moment the host starts. Your first hour begins when you open it after that, so arriving later is fine.'),
+        h('p', { class: 'w-empty-lede' }, Number.isFinite(me.party.plannedStart) ? `The party starts ${fmtWhen(me.party.plannedStart, serverNow())}.` : 'The party hasn’t started yet.'),
+        h('p', null, `This page opens for writing the moment ${Number.isFinite(me.party.plannedStart) ? 'it starts' : 'the host starts'}. Your first hour begins when you open it after that, so arriving later is fine.`),
         h('h2', { class: 'w-empty-h' }, 'How it works'),
         h('ol', { class: 'w-rules' }, ruleList(me.settings).map((r) => h('li', null, r))));
       return;
@@ -1379,7 +1379,8 @@ export async function mountWriter(root, session) {
     barFill = null;
     barSoon = null;
     if (!prog || me.party.phase === 'lobby') {
-      progressBtn.append(h('span', { class: 'w-prog-text' }, me.party.phase === 'lobby' ? 'Waiting for the start' : 'Your hour starts when you begin'));
+      const planned = me.party.phase === 'lobby' && Number.isFinite(me.party.plannedStart) ? `Starts ${fmtWhen(me.party.plannedStart, serverNow())}` : null;
+      progressBtn.append(h('span', { class: 'w-prog-text' }, me.party.phase === 'lobby' ? planned || 'Waiting for the start' : 'Your hour starts when you begin'));
       return;
     }
     // Your hours so far, one box each (labelled; the key is in Details; phones show it only there).

@@ -759,6 +759,7 @@ export function createApp({
     '/api/admin/party': (c) => {
       if (c.body.name !== undefined) party.setPartyName(c.userId, c.body.name);
       if (c.body.plannedEnd !== undefined) party.setPlannedEnd(c.userId, c.body.plannedEnd);
+      if (c.body.plannedStart !== undefined) party.setPlannedStart(c.userId, c.body.plannedStart);
       return { party: party.partyMeta() };
     },
     '/api/admin/settings': (c) => ({ settings: party.setSettings(c.userId, c.body.scoring || c.body), rescoring: party.rescoring }),

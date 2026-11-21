@@ -10,7 +10,7 @@
 //   edit to the end of that window;
 // - only the newest chunk of text carries the ink class (one fading element per card).
 
-import { h, fill, fmtInt, plural, helpLink } from './ui.js';
+import { h, fill, fmtInt, fmtWhen, plural, helpLink } from './ui.js';
 import { api, stream } from './net.js';
 import { renderBlocks, renderNotes, wordsIn } from './md-render.js';
 import { footnotes } from './footnotes.js';
@@ -696,6 +696,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
     const grid = h('div', { class: 'l-grid', 'aria-live': 'off' });
     page.append(sentinel, mast, breakBand, status, pill, grid);
     let mastPhase = null;
+    let mastStart = null; // the planned start the chip shows (lobby)
     const counterEls = {};
     let chipEl = null;
     let chipReconnect = null;
@@ -739,7 +740,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
       }
       const settings = evening.settings || { ...(p.rules || {}), ...(p.hoursMode ? { hoursMode: p.hoursMode } : {}) };
       const nb = nextBreak();
-      const key = JSON.stringify([settings, nb, p.plannedEnd ?? null, signedIn]);
+      const key = JSON.stringify([settings, nb, p.plannedEnd ?? null, p.plannedStart ?? null, signedIn]);
       if (key === evening.key) return;
       evening.key = key;
       let lines = null;
@@ -761,6 +762,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
         missed,
       ];
       const tonight = [];
+      if (Number.isFinite(p.plannedStart)) tonight.push(`Starting ${fmtWhen(p.plannedStart, nowServer())}`);
       if (Number.isFinite(p.plannedEnd)) tonight.push(`Writing until ${clockAt(p.plannedEnd)}`);
       if (nb && Number.isFinite(nb.startAt)) tonight.push(`${nb.label || 'Break'} at ${clockAt(nb.startAt)}`);
       let food = null;
@@ -789,6 +791,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
     function buildMast() {
       const p = S.party;
       mastPhase = p.phase;
+      mastStart = p.plannedStart ?? null;
       const signedIn = !!session?.user;
       const userLink = signedIn
         ? h('a', { class: 'l-link', href: session.user.isAdmin ? '/host' : '/write' }, session.user.isAdmin ? 'Host dashboard' : 'Write')
@@ -800,7 +803,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
       if (p.phase === 'lobby') {
         // The join address and QR code belong to the projector (people read them off the wall);
         // here, visitors are already at the address: a way in instead.
-        chipEl = h('span', { class: 'l-chip is-soon' }, h('i', { 'aria-hidden': 'true' }), 'Starting soon');
+        chipEl = h('span', { class: 'l-chip is-soon' }, h('i', { 'aria-hidden': 'true' }), Number.isFinite(p.plannedStart) ? `Starts ${fmtWhen(p.plannedStart, nowServer())}` : 'Starting soon');
         chipReconnect = null;
         ledeEl = null;
         fill(mast,
@@ -831,7 +834,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
     }
     function party() {
       const p = S.party;
-      if (mastPhase !== p.phase) buildMast();
+      if (mastPhase !== p.phase || mastStart !== (p.plannedStart ?? null)) buildMast();
       if (p.phase === 'lobby') renderEvening();
       const br = p.phase === 'running' ? activeBreak() : null;
       breakBand.hidden = !br;

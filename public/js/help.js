@@ -469,7 +469,8 @@ function footNote(c) {
 export function howTonightWorks(settings = {}) {
   const c = derive({ settings: settings || {}, fromServer: true, role: 'writer' });
   const H = mm(c.syncMin);
-  const lines = [`Write ${n(c.target)} new words each ${hourWord(c)}. Posts and planning notes both count.`];
+  // Callers pick lines by position (live.js: 0, 1, 2 and 5), so the order and count stay fixed.
+  const lines = [`Write ${n(c.target)} new words each ${hourWord(c)}. Posts and planning notes both count.${c.carry > 0 ? ` Up to ${plural(c.carry, 'word')} over the target carry on to your next hour.` : ''}`];
   if (c.mode === 'synced') {
     lines.push(c.minFirst > 0
       ? `Hours run on the clock, ${H} to ${H}, and you can start writing now. With ${plural(c.minFirst, 'minute')} or more left, your first hour is the rest of this one, on a smaller target; with less, those minutes join your first full hour.`
@@ -478,7 +479,6 @@ export function howTonightWorks(settings = {}) {
   lines.push(`A word counts once it has stayed on the page for ${plural(c.settle, 'second')}, so typos and quick changes never cost you.`);
   lines.push('Each word counts once: rewriting counts, but moving, retyping or re-pasting your own words doesn’t.');
   lines.push(`${c.shortCount ? `Pastes of up to ${plural(c.ask, 'word')} count like typing; longer` : `Pastes of up to ${plural(c.ask, 'word')} don’t count; longer`} ones ask which words you wrote today.`);
-  if (c.carry > 0) lines.push(`Words over the target, up to ${plural(c.carry, 'word')}, carry on to your next hour.`);
   lines.push(`${c.out ? 'Miss an hour and you’re out, though you can keep writing' : 'A missed hour is flagged to the host'}${c.passes > 0 ? `; you have ${c.passes === 1 ? 'one free hour' : `${n(c.passes)} free hours`}.` : '.'}`);
   return lines;
 }

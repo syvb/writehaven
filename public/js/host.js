@@ -180,6 +180,24 @@ export async function mountHost(root, { session }) {
   };
   // "HH:MM" typed into a time box, in the browser's local time -> ms (today, or tomorrow if that
   // was more than 6 hours ago).
+  // A start time from a time input: its next occurrence (later today, else tomorrow).
+  function startToMs(hhmm) {
+    const [hh, mm] = String(hhmm || '').split(':').map(Number);
+    if (!Number.isInteger(hh) || !Number.isInteger(mm)) return null;
+    const n = now();
+    const d = new Date(n);
+    d.setHours(hh, mm, 0, 0);
+    if (d.getTime() <= n) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  // "12:00", "tomorrow at 12:00" or "Mon 23 Nov at 12:00", in this browser's days.
+  function dayClock(ms) {
+    const day = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const days = Math.round((day(ms) - day(now())) / 86_400_000);
+    if (days === 0) return clock(ms);
+    if (days === 1) return `tomorrow at ${clock(ms)}`;
+    return `${new Date(ms).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} at ${clock(ms)}`;
+  }
   function clockToMs(hhmm) {
     const [hh, mm] = String(hhmm || '').split(':').map(Number);
     if (!Number.isInteger(hh) || !Number.isInteger(mm)) return null;
@@ -625,7 +643,7 @@ export async function mountHost(root, { session }) {
     const nb = nextBreak();
     const perm = 'Notification' in window ? Notification.permission : 'na';
     const sh = p.phase === 'running' && (!br || modeOf(br) === 'reduce') ? sharedHour() : null;
-    update(top, JSON.stringify([needsEmail(), p.name, p.phase, p.startedAt, p.endedAt, p.plannedEnd, br && [br.label, br.endAt, modeOf(br)], nb && [nb.label, nb.startAt], signUps(), waitingList().length, perm, offline, !!help, sh && [sh.n, sh.startAt, sh.endAt, Math.floor(now() / 60_000)], p.round, p.rounds?.length, v.returning]), () => {
+    update(top, JSON.stringify([needsEmail(), p.name, p.phase, p.startedAt, p.endedAt, p.plannedEnd, p.plannedStart, Math.floor(now() / 3_600_000), br && [br.label, br.endAt, modeOf(br)], nb && [nb.label, nb.startAt], signUps(), waitingList().length, perm, offline, !!help, sh && [sh.n, sh.startAt, sh.endAt, Math.floor(now() / 60_000)], p.round, p.rounds?.length, v.returning]), () => {
       const nameIn = h('input', { class: 'h-name', value: p.name, 'aria-label': 'Party name (click to rename)', maxlength: 80, spellcheck: 'false' });
       nameIn.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') nameIn.blur();
@@ -643,7 +661,7 @@ export async function mountHost(root, { session }) {
         act('/api/admin/party', { name }, 'Party name saved');
       });
       let line;
-      if (p.phase === 'lobby') line = [h('b', null, 'Not started'), ` · ${plural(signUps(), 'writer')} signed up`, waitingList().length ? ` · ${waitingList().length} waiting for approval` : ''];
+      if (p.phase === 'lobby') line = [h('b', null, Number.isFinite(p.plannedStart) ? `Starts ${dayClock(p.plannedStart)}` : 'Not started'), ` · ${plural(signUps(), 'writer')} signed up`, waitingList().length ? ` · ${waitingList().length} waiting for approval` : ''];
       // The next round opens from the server (lib/rounds.js): this round's anthology stays.
       else if (p.phase === 'ended') line = [h('b', null, `Ended at ${clock(p.endedAt)}`), ' · for the next round, stop the server and run ', h('code', null, 'node server.js --new-round')];
       else if (br) {
@@ -731,6 +749,7 @@ export async function mountHost(root, { session }) {
       title: 'Start the party?',
       body: [
         n ? `${plural(n, 'writer')} ${n === 1 ? 'has' : 'have'} signed up.` : 'Nobody has signed up yet.',
+        Number.isFinite(v.party.plannedStart) ? `It’s set to start by itself ${dayClock(v.party.plannedStart)}; this starts it now instead.` : null,
         ...when,
         v.party.registrationOpen ? `Sign-ups stay open at ${shownUrl(joinUrl())}.` : 'Sign-ups are closed. You can open them again under “Invite writers”.',
       ],
@@ -1261,7 +1280,7 @@ export async function mountHost(root, { session }) {
     const s = v.settings;
     const waiting = waitingList().length;
     const declined = queue().filter((x) => x.approval === 'declined');
-    const key = JSON.stringify([p, joinUrl(), signUps(), v.party.registrationOpen, v.party.plannedEnd, s.targetPerHour, s.freePassesPerWriter, s.carryOverMax, s.missedHourOutcome, s.approvalRequired, s.hoursMode, s.syncMinute, s.minFirstHourMin, waiting, declined.map((x) => x.id), setupOpen, !!qr, v.writers.filter((x) => x.isAdmin).map((x) => x.name), v.party.hosts]);
+    const key = JSON.stringify([p, joinUrl(), signUps(), v.party.registrationOpen, v.party.plannedEnd, v.party.plannedStart, Math.floor(now() / 3_600_000), s.targetPerHour, s.freePassesPerWriter, s.carryOverMax, s.missedHourOutcome, s.approvalRequired, s.hoursMode, s.syncMinute, s.minFirstHourMin, waiting, declined.map((x) => x.id), setupOpen, !!qr, v.writers.filter((x) => x.isAdmin).map((x) => x.name), v.party.hosts]);
     update(setupEl, key, () => {
       const url = joinUrl();
       const n = signUps();
@@ -1303,6 +1322,12 @@ export async function mountHost(root, { session }) {
         const t = end.value ? clockToMs(end.value) : null;
         act('/api/admin/party', { plannedEnd: t }, t ? `Planned end: ${clock(t)}.` : 'Planned end cleared.');
       });
+      // The planned start (lobby only): the party starts by itself then (lib/party.js startIfDue).
+      const startIn = h('input', { type: 'time', value: Number.isFinite(v.party.plannedStart) ? clock(v.party.plannedStart) : '', 'aria-label': 'Start the party at' });
+      startIn.addEventListener('change', () => {
+        const t = startIn.value ? startToMs(startIn.value) : null;
+        act('/api/admin/party', { plannedStart: t }, t ? `The party will start by itself ${dayClock(t)}.` : 'Planned start cleared: start it yourself.');
+      });
       const passes = s.freePassesPerWriter ?? 1;
       const carry = s.carryOverMax ?? 0;
       const rules = [
@@ -1332,6 +1357,11 @@ export async function mountHost(root, { session }) {
         hoursCtl,
         h('h3', null, 'The rules, in four lines'),
         h('ol', { class: 'h-rules' }, rules.map((x) => h('li', null, x))),
+        p === 'lobby' ? h('div', { class: 'h-plan' },
+          h('label', null, h('span', null, 'Start at'), startIn),
+          h('p', { class: 'h-sub' }, Number.isFinite(v.party.plannedStart)
+            ? `The party starts by itself ${dayClock(v.party.plannedStart)}. You can still start it sooner; clear the time to cancel.`
+            : 'Optional. The party starts by itself at this time; writers and the live page see it.')) : null,
         h('div', { class: 'h-plan' },
           h('label', null, h('span', null, 'Planned end'), end),
           h('p', { class: 'h-sub' }, 'Optional. The live page shows it; ending is always your call.')),
