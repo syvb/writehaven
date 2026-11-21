@@ -1783,6 +1783,8 @@ export async function mountWriter(root, session) {
       p ? { label: 'Copy for LessWrong, Substack or Google Docs', onClick: () => copyForWeb(p) } : null,
       p ? { label: 'Export this post…', onClick: () => exportDialog(false) } : null,
       posts.length ? { label: 'Export all my posts…', onClick: () => exportDialog(true) } : null,
+      // Their posts from earlier rounds (lib/rounds.js), to read, copy or download.
+      me.me.pastPosts > 0 ? { label: 'My earlier rounds', hint: plural(me.me.pastPosts, 'post'), onClick: () => window.open('/past', '_blank', 'noopener') } : null,
       writable() ? { label: 'Open a file as a new post…', onClick: () => openFile() } : null,
       writable() && p ? { label: 'Brainstorm…', hint: 'before you start', onClick: () => openBrainstormPanel() } : null,
       { label: 'Food preferences…', onClick: () => import('./food.js').then((m) => m.openFoodSheet({ returnFocus: meBtn }), () => toast('You seem to be offline. Try again when you’re back.', { kind: 'warn' })) },

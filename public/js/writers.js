@@ -231,15 +231,16 @@ export async function mountProfile(root, { id, session } = {}) {
       h('p', { class: 'wr-all' }, h('a', { href: '/writers' }, 'All the writers'))));
   fill(root, page);
 
-  // One piece: its title, length and opening, linking to its page; on your own page, a star.
-  function entry(p) {
+  // One piece: its title, length and opening, linking to its page; on your own page, a star
+  // (not on an earlier round's pieces: those rounds are closed).
+  function entry(p, closed = false) {
     const link = h('a', { href: `/p/${encodeURIComponent(p.publicId)}` },
       h('span', { class: 'a-entry-line' },
         h('span', { class: 'a-entry-title' }, p.title || 'Untitled'),
         h('span', { class: 'a-leader', 'aria-hidden': 'true' }),
         h('span', { class: 'a-entry-words' }, plural(p.words, 'word'))),
       p.excerpt ? h('span', { class: 'a-entry-ex' }, p.excerpt) : null);
-    if (!own) return h('li', { class: 'a-entry wp-entry', 'data-id': p.publicId }, link);
+    if (!own || closed) return h('li', { class: 'a-entry wp-entry', 'data-id': p.publicId }, link);
     const title = p.title || 'Untitled';
     const btn = h('button', {
       class: 'wp-star', type: 'button', 'aria-pressed': p.starred ? 'true' : 'false',
@@ -251,7 +252,7 @@ export async function mountProfile(root, { id, session } = {}) {
   }
   const group = (hid, label, list, mark = false) => h('section', { class: 'wp-group', 'aria-labelledby': hid },
     h('h2', { class: 'a-contents-h wp-group-h', id: hid }, mark ? starIcon(true, 'wp-mark') : null, label),
-    h('ol', { class: 'a-toc wp-list' }, list.map(entry)));
+    h('ol', { class: 'a-toc wp-list' }, list.map((p) => entry(p))));
 
   function render() {
     const body = `${own}${JSON.stringify(v)}`;
@@ -272,12 +273,19 @@ export async function mountProfile(root, { id, session } = {}) {
     // SPEC §28b: the pieces they starred first, under "Starred"; then the rest.
     const starred = posts.filter((p) => p.starred);
     const rest = posts.filter((p) => !p.starred);
+    // Earlier rounds (lib/rounds.js): their signed pieces, newest round first, after this round's.
+    const past = Array.isArray(v.past) ? v.past : [];
+    const pastGroups = past.map((g) => h('section', { class: 'wp-group', 'aria-labelledby': `wp-round-${g.round}` },
+      h('h2', { class: 'a-contents-h wp-group-h', id: `wp-round-${g.round}` }, h('a', { href: `/archive/${encodeURIComponent(g.round)}` }, `Round ${g.round}`)),
+      h('ol', { class: 'a-toc wp-list' }, g.posts.map((p) => entry(p, true)))));
+    const roundLabel = past.length && party.round ? ` · Round ${party.round}` : '';
     fill(listBox,
-      posts.length ? null : h('section', { class: 'wp-group' },
+      posts.length || (past.length && party.phase === 'lobby') ? null : h('section', { class: 'wp-group' },
         h('h2', { class: 'a-contents-h wp-group-h' }, 'Signed pieces'),
         h('p', { class: 'wr-none' }, party.phase === 'ended' ? 'No signed pieces.' : own ? 'No signed pieces yet. Posts you sign with your name appear here.' : 'No signed pieces yet.')),
       starred.length ? group('wp-starred-h', 'Starred', starred, true) : null,
-      rest.length ? group('wp-rest-h', starred.length ? 'More pieces' : rest.length === 1 ? 'Signed piece' : 'Signed pieces', rest) : null);
+      rest.length ? group('wp-rest-h', starred.length ? `More pieces${roundLabel}` : `${rest.length === 1 ? 'Signed piece' : 'Signed pieces'}${roundLabel}`, rest) : null,
+      ...pastGroups);
     if (back) listBox.querySelector(`.wp-entry[data-id="${CSS.escape(back.id)}"] ${back.star ? '.wp-star' : 'a'}`)?.focus({ preventScroll: true });
   }
   async function reload() {

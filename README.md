@@ -42,6 +42,10 @@ and the front end is plain ES modules plus a few vendored bundles.
   notifications), food preferences and a food order, and exports.
 - **After the party**: posts stay editable (removing a large part asks for a reason), and new
   posts start private.
+- **Rounds**: the same site can hold one party after another. A new round opens in a fresh lobby
+  with the same accounts; earlier rounds stay readable: their anthologies (`/archive/<n>`), their
+  post pages at the same addresses, each writer's signed pieces on their page, and a writer's own
+  posts from them, private ones included (`/past`).
 - **Accounts**: username and password (scrypt); an email that only the person and the hosts see;
   each person's own custom CSS for their own screens.
 - It installs as an app (web app manifest and service worker), and the writer's page opens
@@ -59,6 +63,15 @@ end the party from the dashboard.
 
 `node server.js --make-admin <username>` makes an existing account a host in the state file. Run
 it while the server is stopped: a running server would overwrite the change.
+
+`node server.js --new-round` closes a party that has ended and opens the next round in the lobby
+(`lib/rounds.js`). Run it while the server is stopped, then start the server again. The closed
+round moves to `rounds/<n>/` in the state directory: `round.json` (what the site serves from it),
+the full `state.json` and its op journal. Carried over: accounts, passwords, emails, hosts,
+approvals, sign-ins, the writers-list pages, custom CSS, the scoring settings, the party's name,
+push subscriptions and the standing food answers (the food order answers are cleared into the food
+history). Started again: posts, hours, passes, reviews, breaks, alerts and the log. Images from the
+closed round stay where its posts link to them but no longer count towards upload quotas.
 
 Everything the server reads from the environment:
 

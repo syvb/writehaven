@@ -715,6 +715,11 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
     const projLink = () => (session?.user?.isAdmin ? h('a', { class: 'l-link l-projector', href: '/live?wall', title: 'For a big screen: two pages at a time in large type, with a clock' }, 'Projector') : null);
     // SPEC §28: the writers who chose to be listed, with their hours and signed pieces.
     const writersLink = () => h('a', { class: 'l-link l-writers', href: '/writers' }, 'Writers');
+    // Earlier rounds' anthologies (lib/rounds.js): the latest one, which links to the rest.
+    const pastRounds = Array.isArray(session?.party?.rounds) ? session.party.rounds : [];
+    const roundsLink = () => (pastRounds.length && !wall
+      ? h('a', { class: 'l-link l-rounds', href: `/archive/${pastRounds[pastRounds.length - 1].n}` }, pastRounds.length === 1 ? `Round ${pastRounds[0].n}` : 'Earlier rounds')
+      : null);
     // The lobby's "How the evening works": the rules in a few lines (help.js's wording, with the
     // party's numbers where known: the signed-in writer's settings, else what the public view
     // carries), what's planned tonight, food and links. It fills the poster's empty half.
@@ -799,7 +804,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
         chipReconnect = null;
         ledeEl = null;
         fill(mast,
-          h('div', { class: 'l-mast-top' }, chipEl, h('nav', { class: 'l-mast-nav' }, helpLink(undefined, { className: 'l-help' }), writersLink(), projLink(), userLink)),
+          h('div', { class: 'l-mast-top' }, chipEl, h('nav', { class: 'l-mast-nav' }, helpLink(undefined, { className: 'l-help' }), writersLink(), roundsLink(), projLink(), userLink)),
           h('h1', { class: 'l-name' }, p.name),
           h('p', { class: 'l-lede' }, 'A writing party. Once it starts, pages appear here as they’re written, anonymously unless their writer signs them.'),
           cta('l-cta-lobby'),
@@ -817,7 +822,7 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
       }
       counterEls.box = dl;
       fill(mast,
-        h('div', { class: 'l-mast-top' }, chipEl, h('nav', { class: 'l-mast-nav' }, helpLink(undefined, { className: 'l-help' }), writersLink(), projLink(), signedIn ? userLink : cta('l-cta-top'))),
+        h('div', { class: 'l-mast-top' }, chipEl, h('nav', { class: 'l-mast-nav' }, helpLink(undefined, { className: 'l-help' }), writersLink(), roundsLink(), projLink(), signedIn ? userLink : cta('l-cta-top'))),
         h('div', { class: 'l-mast-row' }, h('h1', { class: 'l-name' }, p.name), dl),
         cta('l-cta-row'),
         ledeEl = h('p', { class: 'l-lede' }, 'Every page below is being written right now, anonymously unless its writer signs it.'));
@@ -1306,20 +1311,37 @@ export async function mountLive(root, { session, wall: wallOpt } = {}) {
 }
 
 // ---------------------------------------------------------------- the anthology
-export async function mountArchive(root, { session, wall = wallWanted() } = {}) {
+// round: a round's number (/archive/<n>): an earlier round's anthology (lib/rounds.js), or the
+// current round's.
+export async function mountArchive(root, { session, wall = wallWanted(), round = null } = {}) {
   let v;
   let ses = session;
   try {
-    [v, ses] = await Promise.all([api('/api/archive'), api('/api/session').catch(() => session)]);
-  } catch {
-    fill(root, h('div', { class: 'l-page' }, h('p', { class: 'l-status' }, 'Couldn’t load the anthology. Check your connection and reload.')));
+    [v, ses] = await Promise.all([api(round ? `/api/archive?round=${encodeURIComponent(round)}` : '/api/archive'), api('/api/session').catch(() => session)]);
+  } catch (e) {
+    fill(root, h('div', { class: 'l-page' }, e.status === 404
+      ? [h('h1', { class: 'l-name' }, 'No such round'), h('p', null, h('a', { href: '/' }, 'Go to the party'))]
+      : h('p', { class: 'l-status' }, 'Couldn’t load the anthology. Check your connection and reload.')));
     return undefined;
   }
   if (v.party.phase !== 'ended') return mountLive(root, { session: ses });
-  document.body.classList.toggle('is-projector', !!wall);
-  const party = ses?.party || {};
+  const past = !!v.party.past;
+  const wallMode = !!wall && !past; // the projector shows the current round
+  document.body.classList.toggle('is-projector', wallMode);
+  // This round's times (the anthology carries none): the session's, or an earlier round's from its list.
+  const timed = Array.isArray(ses?.party?.rounds) ? ses.party.rounds : [];
+  const party = past ? timed.find((r) => r.n === v.party.round) || {} : ses?.party || {};
   const name = v.party.name;
-  document.title = `${name}: the anthology`;
+  // Several rounds: each anthology says which round it is, and links to the others.
+  const rounds = (Array.isArray(v.rounds) ? v.rounds : []).map((r) => ({ ...r, ...(timed.find((x) => x.n === r.n) || {}) }));
+  const multi = rounds.length > 0 || v.party.round > 1;
+  const roundName = multi && v.party.round ? `round ${v.party.round}` : '';
+  document.title = roundName ? `${name}, ${roundName}: the anthology` : `${name}: the anthology`;
+  const current = ses?.party || {};
+  const others = multi ? [
+    ...rounds.filter((r) => r.n !== v.party.round).map((r) => ({ n: r.n, href: `/archive/${r.n}`, label: `Round ${r.n}${r.startedAt ? `, ${longDate(r.startedAt)}` : ''}` })),
+    ...(past && current.round ? [{ n: current.round, href: '/', label: `Round ${current.round}${current.phase === 'running' ? ': live now' : current.phase === 'lobby' ? ': coming up' : ''}` }] : []),
+  ].sort((a, b) => a.n - b.n) : [];
   const n = v.counters.posts;
   // Everyone who wrote (not the authors of these pieces, which could tie posts together);
   // a small number would say too much, so it shows from three up.
@@ -1343,10 +1365,12 @@ export async function mountArchive(root, { session, wall = wallWanted() } = {}) 
         p.excerpt ? h('span', { class: 'a-entry-ex' }, blurb(p.excerpt)) : null)))));
   const colophon = h('footer', { class: 'a-colophon' },
     h('p', { class: 'a-orn', 'aria-hidden': 'true' }, '⁂'),
-    h('p', null, `Written at ${name}${party.startedAt ? `, ${longDate(party.startedAt)}` : ''}, in one sitting, and published as it was written. Set in Newsreader and Instrument Sans.`));
+    h('p', null, `Written at ${name}${roundName ? `, ${roundName}` : ''}${party.startedAt ? `, ${longDate(party.startedAt)}` : ''}, in one sitting, and published as it was written. Set in Newsreader and Instrument Sans.`),
+    others.length ? h('nav', { class: 'a-rounds', 'aria-label': 'Other rounds' },
+      h('p', null, 'The other rounds: ', ...others.flatMap((o, i) => [i ? ' · ' : null, h('a', { href: o.href }, o.label)]))) : null);
   const head = h('header', { class: 'a-head' },
     h('div', { class: 'l-mast-top' },
-      h('span', { class: 'l-chip is-ended' }, `${name}`),
+      h('span', { class: 'l-chip is-ended' }, roundName ? `${name} · Round ${v.party.round}` : `${name}`),
       h('nav', { class: 'l-mast-nav' },
         h('a', { class: 'l-link', href: '/writers' }, 'The writers'), // SPEC §28
         signedIn ? h('a', { class: 'l-link', href: ses.user.isAdmin ? '/host' : '/write' }, ses.user.isAdmin ? 'Host dashboard' : 'Your posts') : h('a', { class: 'l-link', href: '/login' }, 'Sign in'))),
@@ -1355,7 +1379,7 @@ export async function mountArchive(root, { session, wall = wallWanted() } = {}) 
   const book = h('div', { class: 'l-page a-page' }, head,
     n ? h('nav', { class: 'a-contents', 'aria-label': 'Contents' }, h('h2', { class: 'a-contents-h' }, 'Contents'), toc) : null,
     colophon);
-  if (!wall) {
+  if (!wallMode) {
     fill(root, book);
     return undefined;
   }
@@ -1411,8 +1435,10 @@ export async function mountPost(root, { id, session }) {
     more.hidden = !href;
   };
   paintBy(p);
+  // A post of an earlier round (lib/rounds.js) belongs to that round's anthology.
+  const home = p.past ? `/archive/${encodeURIComponent(p.round)}` : '/';
   fill(root, h('article', { class: 'l-page p-page' },
-    h('p', { class: 'p-back' }, h('a', { href: '/' }, running ? `${p.party}: live` : `${p.party}: the anthology`)),
+    h('p', { class: 'p-back' }, h('a', { href: home }, running ? `${p.party}: live` : p.past ? `${p.party}, round ${p.round}: the anthology` : `${p.party}: the anthology`)),
     running ? h('p', { class: 'p-chip' }, h('i', { 'aria-hidden': 'true' }), 'Being written now') : null,
     h('h1', { class: 'p-title' }, p.title || 'Untitled'),
     by,
@@ -1454,7 +1480,7 @@ export async function mountPost(root, { id, session }) {
   }
   // After the party: an ornament, then the next piece in the anthology's order.
   try {
-    const a = await api('/api/archive');
+    const a = await api(p.past ? `/api/archive?round=${encodeURIComponent(p.round)}` : '/api/archive');
     const i = a.posts.findIndex((x) => x.id === id);
     const next = i >= 0 ? a.posts[i + 1] : null;
     fill(after,
@@ -1463,7 +1489,7 @@ export async function mountPost(root, { id, session }) {
         ? h('p', { class: 'p-next' }, h('span', { class: 'p-next-k' }, 'Next'), h('a', { href: `/p/${encodeURIComponent(next.id)}` }, next.title || 'Untitled'))
         : h('p', { class: 'p-next' }, h('span', { class: 'p-next-k' }, 'That’s the last piece')),
       more,
-      h('p', { class: 'p-contents' }, h('a', { href: '/' }, 'All pieces: the contents')));
+      h('p', { class: 'p-contents' }, h('a', { href: home }, 'All pieces: the contents')));
   } catch {
     if (!more.hidden) fill(after, more); // the end mark, and the writer's page if they have one
   }

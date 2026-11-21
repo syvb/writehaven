@@ -24,6 +24,7 @@ import { attachAccounts, editRights } from './lib/accounts.js';
 import { attachWriters } from './lib/writers.js';
 import { createHashGate } from './lib/hashgate.js';
 import { watchCertificate, createAcmeServer } from './lib/tls.js';
+import { loadRounds, roundsDirOf, closeRound } from './lib/rounds.js';
 import {
   hashPassword, verifyPassword, newSessionToken, LoginLimiter, parseCookies, sessionCookie,
 } from './lib/auth.js';
@@ -272,6 +273,7 @@ export function createApp({
   const legacy = raw && raw.ops && Object.keys(raw.ops).length && !Object.keys(recs).length;
   const party = new Party({
     state: raw, journal: legacy ? null : recs, journalFresh, now, adminUsers, log, publicUrl, tz, testKnobs, asyncRescore: true,
+    pastRounds: loadRounds(roundsDirOf(stateFile), { log }), // closed rounds (lib/rounds.js), served read-only
     overrides: Number.isFinite(hourLengthMin) && hourLengthMin > 0 ? { hourLengthMin } : null,
     ...(recomputeMinMs !== undefined ? { recomputeMinMs } : {}),
   });
@@ -484,6 +486,18 @@ export function createApp({
     const body = JSON.stringify(party.archiveView());
     const json = c && c.json.body === body ? c.json : { body, buf: enc(body), gz: null, etag: `"a${t.toString(36)}-${body.length.toString(36)}"` };
     archiveCache = { at: t, rev: party.publicRev, phase: party.phase, json };
+    return json;
+  }
+  // GET /api/archive?round=<n>: an earlier round's, rebuilt only after a public change (a writer's
+  // new display name, an approval): its posts never change.
+  const pastArchiveCache = new Map(); // n -> { rev, json }
+  function pastArchiveJson(n) {
+    const c = pastArchiveCache.get(n);
+    if (c && c.rev === party.publicRev) return c.json;
+    const body = JSON.stringify(party.pastArchiveView(n)); // 404 for a round that doesn't exist
+    const t = Date.now();
+    const json = c && c.json.body === body ? c.json : { body, buf: enc(body), gz: null, etag: `"r${n}-${t.toString(36)}-${body.length.toString(36)}"` };
+    pastArchiveCache.set(n, { rev: party.publicRev, json });
     return json;
   }
   function sendCachedJson(req, res, c) {
@@ -826,8 +840,17 @@ export function createApp({
             else liveByIp.delete(ip);
           });
         }
-        case '/api/archive':
-          return sendCachedJson(req, res, archiveJson());
+        case '/api/archive': {
+          // ?round=<n>: an earlier round's anthology (lib/rounds.js); the current round's otherwise.
+          const r = url.searchParams.get('round');
+          if (r === null || r === '' || Number(r) === party.round) return sendCachedJson(req, res, archiveJson());
+          if (!/^[1-9]\d{0,5}$/.test(r)) return sendJson(req, res, 404, { error: 'No such round' });
+          return sendCachedJson(req, res, pastArchiveJson(Number(r)));
+        }
+        case '/api/me/past':
+          return sendJson(req, res, 200, party.myPast(needUser(c)));
+        case '/api/me/past/post':
+          return sendJson(req, res, 200, party.myPastPost(needUser(c), Number(url.searchParams.get('round')), url.searchParams.get('id')));
         case '/api/me':
           return sendJson(req, res, 200, party.meView(needUser(c)));
         case '/api/me/events': {
@@ -1255,9 +1278,26 @@ function makeAdminCli(username) {
   return 0;
 }
 
+// node server.js --new-round: close the ended round and open the next in a fresh lobby, with the
+// same accounts (lib/rounds.js). Like --make-admin, only while the server is stopped.
+function newRoundCli() {
+  const file = stateFilePath();
+  try {
+    const r = closeRound({ stateFile: file, tz: process.env.WH_TZ || DEFAULT_TZ });
+    console.log(`Round ${r.closed} closed: ${r.posts} posts (${r.published} published) and its journal are in ${r.dir}.`);
+    console.log(`Round ${r.opened} is open, in the lobby, with all ${r.users} accounts; ${r.images} images from round ${r.closed} no longer count towards upload quotas.`);
+    console.log('Start the server; a host starts the party from the dashboard.');
+    return 0;
+  } catch (e) {
+    console.error(`Couldn't open a new round: ${e.message}`);
+    return 1;
+  }
+}
+
 async function main(argv) {
   const i = argv.indexOf('--make-admin');
   if (i >= 0) process.exit(makeAdminCli(argv[i + 1]));
+  if (argv.includes('--new-round')) process.exit(newRoundCli());
   const port = Number(process.env.PORT || 8110);
   const host = process.env.HOST || '127.0.0.1';
   const adminUsers = String(process.env.WH_ADMIN_USERS || '').split(',').map((s) => s.trim()).filter(Boolean);

@@ -48,6 +48,20 @@ async function main() {
     } catch { /* a malformed address: not found */ }
     return pages.mountProfile(root, { id, session });
   }
+  // A round's anthology by its number: the earlier rounds' stay readable (lib/rounds.js).
+  const roundPath = /^\/archive\/([1-9]\d{0,5})$/.exec(path);
+  if (roundPath) {
+    screen('public');
+    const live = await import('./live.js');
+    return live.mountArchive(root, { session, round: Number(roundPath[1]) });
+  }
+  // Your own posts from earlier rounds, private ones included.
+  if (path === '/past') {
+    if (!session.user) return location.replace('/login');
+    screen('public');
+    const { mountPast } = await import('./past.js');
+    return mountPast(root, { session });
+  }
   if (path === '/live' || path === '/archive' || (path === '/' && !session.user)) {
     screen('public');
     const live = await import('./live.js');

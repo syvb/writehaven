@@ -2422,3 +2422,20 @@ body.is-projector .nt-row, body.is-projector .nt-top { display: none !important;
 .footnotes li { scroll-margin-top: 30vh; }
 .footnotes li:target { border-radius: 2px; background: var(--accent-wash); box-shadow: -0.4em 0 0 var(--accent-wash), 0.4em 0 0 var(--accent-wash); }
 .prose .fn-back { margin-left: 0.2em; font-family: var(--sans); color: var(--accent); text-decoration: none; }
+
+/* Several rounds (lib/rounds.js): an anthology's links to the other rounds, and /past, a
+   writer's own posts from the rounds that have closed. */
+.a-colophon > p:not(.a-orn) { max-width: 30rem; margin: 0 auto; }
+.a-rounds { margin: 1.2rem auto 0; max-width: 30rem; font-style: normal; font-family: var(--sans); font-size: 0.85rem; }
+.a-rounds a { color: var(--ink-2); }
+.past-title { font-size: clamp(2.4rem, 7vw, 4.4rem); }
+.past-round { margin-top: clamp(2rem, 6vw, 3.5rem); }
+.past-round-h a { color: inherit; }
+.past-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.4rem 1rem; padding: 1rem 0; }
+.past-main { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; flex: 1 1 16rem; }
+.past-main a { color: inherit; }
+.past-meta { font: 500 0.8rem var(--sans); color: var(--ink-3); }
+.past-acts { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.past-text { padding: 0 0 1.6rem; }
+.past-notes { margin-top: 1.6rem; padding-top: 1rem; border-top: 1px dashed var(--rule); }
+.past-notes-text { margin: 0; white-space: pre-wrap; font: 400 1rem/1.55 var(--serif); color: var(--ink-2); }

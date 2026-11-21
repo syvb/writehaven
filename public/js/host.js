@@ -643,7 +643,8 @@ export async function mountHost(root, { session }) {
       });
       let line;
       if (p.phase === 'lobby') line = [h('b', null, 'Not started'), ` · ${plural(signUps(), 'writer')} signed up`, waitingList().length ? ` · ${waitingList().length} waiting for approval` : ''];
-      else if (p.phase === 'ended') line = [h('b', null, `Ended at ${clock(p.endedAt)}`)];
+      // The next round opens from the server (lib/rounds.js): this round's anthology stays.
+      else if (p.phase === 'ended') line = [h('b', null, `Ended at ${clock(p.endedAt)}`), ' · for the next round, stop the server and run ', h('code', null, 'node server.js --new-round')];
       else if (br) {
         // "Dinner break until 19:00 · this hour's target 200" or "… · hours paused" (SPEC §19).
         const extra = modeOf(br) === 'pause' ? ' · hours paused' : sh ? ` · this hour’s target ${fmtInt(reducedTarget(sh))}` : ' · targets lowered for the break';
@@ -656,6 +657,7 @@ export async function mountHost(root, { session }) {
         if (p.plannedEnd) line.push(` · planned end ${clock(p.plannedEnd)}`);
         if (nb) line.push(` · ${nb.label} at ${clock(nb.startAt)}`);
       }
+      if (p.round > 1 || p.rounds?.length) line.unshift(h('b', null, `Round ${p.round}`), ' · '); // lib/rounds.js
       const phaseCls = br && p.phase === 'running' ? (modeOf(br) === 'reduce' ? 'phase-onbreak' : 'phase-break') : `phase-${p.phase}`;
       let primary = null;
       if (p.phase === 'lobby') primary = h('button', { class: 'btn btn-primary h-go', type: 'button', onClick: startParty }, 'Start the party…');
@@ -665,6 +667,9 @@ export async function mountHost(root, { session }) {
         p.phase !== 'ended' ? { label: 'Live page', href: '/live', blank: true } : null,
         { label: 'Projector', href: '/live?wall', blank: true },
         { label: 'Write', href: '/write' },
+        // Earlier rounds (lib/rounds.js): their anthologies, and your own posts from them.
+        p.rounds?.length ? { label: 'Earlier rounds', href: `/archive/${p.rounds[p.rounds.length - 1].n}`, blank: true } : null,
+        p.rounds?.length ? { label: 'My earlier rounds', href: '/past', blank: true } : null,
         { label: 'Export everything (JSON)', href: '/api/admin/export.json', menuOnly: true },
         // Published posts only (the server leaves out separate-identity posts until the end).
         { label: 'Export published posts (Markdown)', href: '/api/admin/export.md', menuOnly: true },
