@@ -3,6 +3,7 @@
 // Zero runtime dependencies (Node 20 built-ins only).
 
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -22,6 +23,7 @@ import { attachTabOrder } from './lib/taborder.js';
 import { attachAccounts, editRights } from './lib/accounts.js';
 import { attachWriters } from './lib/writers.js';
 import { createHashGate } from './lib/hashgate.js';
+import { watchCertificate, createAcmeServer } from './lib/tls.js';
 import {
   hashPassword, verifyPassword, newSessionToken, LoginLimiter, parseCookies, sessionCookie,
 } from './lib/auth.js';
@@ -193,6 +195,7 @@ export class RegLimiter {
   }
 }
 function isHttps(req) {
+  if (req.socket.encrypted) return true; // served over TLS here (lib/tls.js)
   const p = req.headers['x-forwarded-proto'];
   return typeof p === 'string' && p.split(',')[0].trim().toLowerCase() === 'https';
 }
@@ -247,6 +250,7 @@ export function createApp({
   routes = [], // extra routes (see extraRoutes below)
   setupToken = null, // env WH_SETUP_TOKEN: the first account (the host) needs it (/register?setup=<token>)
   hashLimits = {}, // { running, queued, perIp, perHostIp }: password hashing at once (lib/hashgate.js)
+  tls = null, // { certFile, keyFile, everyMs? }: serve HTTPS with these PEM files (env WH_TLS_CERT, WH_TLS_KEY; lib/tls.js)
 } = {}) {
   // Streams. Signed-in ones (a writer's own stream, the live page in a signed-in tab) are keyed
   // by session: 4 of each per session, the oldest closes, never refused. Anonymous live streams:
@@ -1159,13 +1163,15 @@ export function createApp({
     return serveStatic(req, res, p, url);
   }
 
-  const server = http.createServer((req, res) => {
+  const onRequest = (req, res) => {
     handle(req, res).catch((e) => {
       log.error('[http]', e);
       if (!res.headersSent) sendJson(req, res, 500, { error: 'Server error' });
       else res.destroy();
     });
-  });
+  };
+  // With TLS, the certificate is loaded by start() (and reloaded when it's renewed).
+  const server = tls ? https.createServer({}, onRequest) : http.createServer(onRequest);
   server.keepAliveTimeout = 65_000;
   server.maxConnections = maxConnections;
   server.headersTimeout = 70_000;
@@ -1178,7 +1184,8 @@ export function createApp({
     }
   };
 
-  function start(port, host = '127.0.0.1') {
+  async function start(port, host = '127.0.0.1') {
+    if (tls) timers.push(await watchCertificate(server, { ...tls, log }));
     return new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, host, () => {
@@ -1263,6 +1270,9 @@ async function main(argv) {
   const regMax = Number(process.env.WH_REG_PER_IP);
   const regHostMax = Number(process.env.WH_REG_PER_HOST_IP);
   const regFailMax = Number(process.env.WH_REG_FAILS_PER_IP);
+  const tlsCert = process.env.WH_TLS_CERT;
+  const tlsKey = process.env.WH_TLS_KEY;
+  if (Boolean(tlsCert) !== Boolean(tlsKey)) throw new Error('Set both WH_TLS_CERT and WH_TLS_KEY, or neither');
   const app = createApp({
     stateFile: stateFilePath(), adminUsers,
     setupToken: process.env.WH_SETUP_TOKEN || null,
@@ -1274,6 +1284,7 @@ async function main(argv) {
     tz: process.env.WH_TZ || DEFAULT_TZ,
     testKnobs: process.env.WH_TEST_KNOBS === '1',
     hourLengthMin: Number.isFinite(hourMin) && hourMin > 0 ? hourMin : null,
+    tls: tlsCert ? { certFile: path.resolve(tlsCert), keyFile: path.resolve(tlsKey) } : null,
     routes: [
       ...createUploads({ dir: path.join(path.dirname(stateFilePath()), 'uploads') }).routes, // SPEC §14 images
       ...createFood().routes, // SPEC §18, §18b, §20 food preferences and tonight's order
@@ -1300,8 +1311,20 @@ async function main(argv) {
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+  const httpPort = envInt('WH_HTTP_PORT');
+  if (tlsCert && httpPort) {
+    // Let's Encrypt's HTTP-01 challenges (certbot --webroot), and HTTP to HTTPS redirects.
+    const webroot = path.join(path.dirname(stateFilePath()), 'acme');
+    fs.mkdirSync(webroot, { recursive: true });
+    const acme = createAcmeServer({ webroot, httpsPort: port });
+    await new Promise((resolve, reject) => {
+      acme.once('error', reject);
+      acme.listen(httpPort, host, resolve);
+    });
+    console.log(`[writehaven] http://${host}:${httpPort} · ACME challenges from ${webroot}, everything else to HTTPS`);
+  }
   const addr = await app.start(port, host);
-  console.log(`[writehaven] http://${addr.address}:${addr.port} · state ${stateFilePath()} · phase ${app.party.phase}`);
+  console.log(`[writehaven] ${tlsCert ? 'https' : 'http'}://${addr.address}:${addr.port} · state ${stateFilePath()} · phase ${app.party.phase}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

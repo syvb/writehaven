@@ -66,7 +66,7 @@ Everything the server reads from the environment:
 | --- | --- | --- |
 | `PORT` | `8110` | Port to listen on. |
 | `HOST` | `127.0.0.1` | Address to listen on. |
-| `WH_STATE_FILE` | `data/state.json` | The state file. Its directory also holds the op journal (`<state file>.ops/`, one file per writer), `uploads/`, `notify.json`, `vapid.json` (the Web Push keys, made at the first start) and `client-errors.log`. |
+| `WH_STATE_FILE` | `data/state.json` | The state file. Its directory also holds the op journal (`<state file>.ops/`, one file per writer), `uploads/`, `notify.json`, `vapid.json` (the Web Push keys, made at the first start), `client-errors.log` and `acme/` (Let's Encrypt's challenges, with `WH_HTTP_PORT`). |
 | `WH_PUBLIC_URL` | `https://writehaven.example.org` | The join address shown on the projector and the host's screens, and the contact sent with Web Push requests. Set it to your site's address. |
 | `WH_TZ` | `Europe/London` | The party clock's time zone: where hours on the clock start, and the times in logs and exports. Screens show each viewer's own local time. |
 | `WH_SETUP_TOKEN` | none | When set, the first account (the host) can only be made through `/register?setup=<token>`, under any username; after that, nobody can sign up under a name in `WH_ADMIN_USERS`. |
@@ -81,11 +81,45 @@ Everything the server reads from the environment:
 | `WH_FSYNC` | on | `0`: don't flush each batch of edits to disk before acknowledging it. |
 | `WH_HOUR_MIN` | none | Hour length in minutes, for testing. |
 | `WH_TEST_KNOBS` | none | `1`: the host may change test-only settings. |
+| `WH_TLS_CERT` | none | With `WH_TLS_KEY`: serve HTTPS on `PORT` with this certificate chain (PEM, such as certbot's `fullchain.pem`). Both files are checked every minute, so a renewed certificate needs no restart. |
+| `WH_TLS_KEY` | none | The certificate's private key (PEM, such as certbot's `privkey.pem`). |
+| `WH_HTTP_PORT` | none | With TLS: also listen on this port over plain HTTP, answer Let's Encrypt's HTTP-01 challenges from `acme/` in the state directory, and redirect everything else to HTTPS. |
 
-In production, put the server behind an HTTPS reverse proxy or tunnel on the same machine. It
-takes the client's address from `CF-Connecting-IP` or `X-Forwarded-For` only when the connection
+In production, serve it over HTTPS: by itself, with a Let's Encrypt certificate (below), or
+behind an HTTPS reverse proxy or tunnel on the same machine. Behind a proxy, it takes the
+client's address from `CF-Connecting-IP` or `X-Forwarded-For` only when the connection
 comes from loopback, and marks the session cookie `Secure` when `X-Forwarded-Proto` is `https`.
 Browsers allow Web Push and the service worker only over HTTPS (or on localhost).
+
+### HTTPS with Let's Encrypt
+
+With `WH_TLS_CERT` and `WH_TLS_KEY` the server speaks HTTPS itself. With `WH_HTTP_PORT` as
+well, it answers Let's Encrypt's challenges for certbot's webroot mode, so certbot never needs
+the server stopped. Here the server runs as the user `writehaven` in `/srv/writehaven`, for
+`party.example.org`:
+
+1. Point the domain's DNS at the machine, and start the server on ports 443 and 80. Ports below
+   1024 need root or the `CAP_NET_BIND_SERVICE` capability (in a systemd unit:
+   `AmbientCapabilities=CAP_NET_BIND_SERVICE`). Until the certificate files exist, the server
+   answers only the challenges and redirects, and logs that it is waiting for them.
+
+   ```sh
+   HOST=:: PORT=443 WH_HTTP_PORT=80 WH_PUBLIC_URL=https://party.example.org \
+   WH_TLS_CERT=/etc/writehaven/tls/fullchain.pem WH_TLS_KEY=/etc/writehaven/tls/privkey.pem \
+   node server.js
+   ```
+
+2. As root, get the certificate. certbot keeps its files where only root can read them; the
+   deploy hook copies them for the server, now and after every renewal:
+
+   ```sh
+   install -d -m 700 -o writehaven /etc/writehaven/tls
+   certbot certonly --webroot -w /srv/writehaven/data/acme -d party.example.org \
+     --deploy-hook 'install -m 600 -o writehaven "$RENEWED_LINEAGE"/fullchain.pem "$RENEWED_LINEAGE"/privkey.pem /etc/writehaven/tls/'
+   ```
+
+The server loads the certificate within a minute. certbot's own timer renews it before it
+expires, and the server switches to the new one by itself, also within a minute.
 
 ## Tests
 
