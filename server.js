@@ -707,6 +707,8 @@ export function createApp({
       return {};
     },
     '/api/join': (c) => ({ joinedAt: party.join(needUser(c)) }),
+    // A returning writer joins this round (lib/rounds.js): from then on they're one of its writers.
+    '/api/round/join': (c) => party.joinRound(needUser(c)),
     '/api/post/new': (c) => {
       const p = party.newPost(needUser(c), c.body);
       return { post: { id: p.id, title: p.title, privacy: p.privacy, closed: p.closed, unlisted: p.unlisted, ver: p.ver, body: '', notes: '' } };

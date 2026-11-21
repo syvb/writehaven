@@ -266,6 +266,7 @@ export async function mountProfile(root, { id, session } = {}) {
     else nav.prepend(partyLink(party));
     name.textContent = v.name;
     fill(rate, rateText(v, party.phase), v.out ? h('span', { class: 'wp-out' }, ' · out of the challenge') : v.left ? h('span', { class: 'wp-out' }, ' · left the party') : null); // SPEC §33: neutral
+    rate.hidden = v.inRound === false; // not writing in this round (lib/rounds.js): no hours to show
     // Keep the keyboard where it was across an update (a star moves its piece to the other group).
     const active = document.activeElement;
     const back = refocus || (active?.closest?.('.wp-entry') ? { id: active.closest('.wp-entry').dataset.id, star: active.classList.contains('wp-star') } : null);
@@ -280,7 +281,7 @@ export async function mountProfile(root, { id, session } = {}) {
       h('ol', { class: 'a-toc wp-list' }, g.posts.map((p) => entry(p, true)))));
     const roundLabel = past.length && party.round ? ` · Round ${party.round}` : '';
     fill(listBox,
-      posts.length || (past.length && party.phase === 'lobby') ? null : h('section', { class: 'wp-group' },
+      posts.length || (past.length && (party.phase === 'lobby' || v.inRound === false)) ? null : h('section', { class: 'wp-group' },
         h('h2', { class: 'a-contents-h wp-group-h' }, 'Signed pieces'),
         h('p', { class: 'wr-none' }, party.phase === 'ended' ? 'No signed pieces.' : own ? 'No signed pieces yet. Posts you sign with your name appear here.' : 'No signed pieces yet.')),
       starred.length ? group('wp-starred-h', 'Starred', starred, true) : null,

@@ -90,6 +90,15 @@ async function main() {
         return mountWriter(root, session);
       });
     }
+    // An account from an earlier round joins this one first (lib/rounds.js); offline, it can't tell.
+    if (session.user.inRound === false && !session.offline) {
+      screen('approval');
+      return mountRejoin(root, session, async () => {
+        screen('write');
+        const { mountWriter } = await writerP;
+        return mountWriter(root, { ...session, user: { ...session.user, inRound: true } });
+      });
+    }
     screen('write');
     const { mountWriter } = await writerP;
     return mountWriter(root, session);
@@ -283,6 +292,43 @@ async function mountAuth(root, session, mode) {
 
 // Waiting for the host's approval (or declined): a calm card with a message to the host.
 // The `me` stream flips it to the lobby or editor the moment the host approves.
+// A writer from an earlier round (lib/rounds.js) isn't in this one until they say so: then they're
+// on its list of writers, the host's table and the food lists, and can write.
+function mountRejoin(root, session, onJoined) {
+  const p = session.party || {};
+  const partyName = p.name || 'Writehaven';
+  const round = session.user.round || p.round;
+  document.title = `${partyName}: round ${round}`;
+  const go = h('button', { class: 'btn btn-primary ap-go', type: 'button' }, `Join round ${round} →`);
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    go.textContent = 'Joining…';
+    try {
+      await api('/api/round/join', {});
+      await onJoined();
+    } catch (e) {
+      go.disabled = false;
+      go.textContent = `Join round ${round} →`;
+      toast(e.network ? 'You seem to be offline. Try again when you’re back.' : e.message || 'Couldn’t join. Try again.', { kind: 'error' });
+    }
+  });
+  const when = p.phase === 'running' ? `Round ${round} is on now.` : p.phase === 'ended' ? `Round ${round} has ended.` : `Round ${round} hasn’t started yet.`;
+  const lede = p.phase === 'ended'
+    ? `${when} Join it to add posts after the party.`
+    : `${when} Join it to write in it: until you do, you’re not one of its writers.${p.phase === 'running' ? ' Your first hour starts when you start writing.' : ''}`;
+  fill(root, h('div', { class: 'ap' }, h('div', { class: 'ap-card', role: 'main' },
+    h('p', { class: 'ap-kicker' }, partyName),
+    h('h1', { class: 'ap-title' }, `Welcome back, ${session.user.name}`),
+    h('p', { class: 'ap-lede' }, lede),
+    h('p', { class: 'ap-go-row' }, go),
+    h('p', { class: 'ap-lede' }, 'Your posts from earlier rounds are under ', h('a', { href: '/past' }, 'your earlier rounds'), '.'),
+    h('p', { class: 'ap-foot' },
+      h('a', { href: '/live' }, p.phase === 'ended' ? 'Read the anthology' : 'Watch the live page'),
+      helpLink(undefined, { className: 'ap-help' }),
+      h('button', { class: 'btn-link ap-signout', type: 'button', onClick: async () => { await api('/api/logout', {}).catch(() => {}); forgetSession(); location.replace('/login'); } }, 'Sign out')))));
+  go.focus({ preventScroll: true });
+}
+
 function mountApproval(root, session, me, onApproved) {
   const partyName = session.party?.name || 'Writehaven';
   let state = { approval: me.approval, message: me.approvalMessage || '', messageAt: me.approvalMessageAt || null, note: me.approvalNote || null };

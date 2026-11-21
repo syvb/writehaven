@@ -8,7 +8,7 @@ import path from 'node:path';
 import { startApp, client, tmpStateFile, quietLog, makeParty, addUser, makeClock } from './helpers.js';
 import { closeRound, nextRoundState, loadRounds, roundsDirOf, ROUND_USER_KEYS } from '../lib/rounds.js';
 import { createUploads } from '../lib/uploads.js';
-import { foodWordsOf } from '../lib/food.js';
+import { foodWordsOf, peopleOf } from '../lib/food.js';
 import { attachAccounts } from '../lib/accounts.js';
 import { attachWriters } from '../lib/writers.js';
 
@@ -87,6 +87,7 @@ test('rounds: close an ended round, open the next with the same accounts, and ke
   assert.equal(meJson.me.username, 'wren');
   assert.equal(meJson.me.pastPosts, 3);
   assert.equal(meJson.me.joinedAt, null, 'hours start again');
+  assert.equal(meJson.me.inRound, false, 'not in round 2 until they join it');
   assert.equal(meJson.posts.length, 0, 'no posts in the new round');
   assert.equal((await host2.post('/api/login', { username: 'hostuser', password: PASSWORD })).status, 200);
   assert.equal((await w2.post('/api/login', { username: 'wren', password: PASSWORD })).status, 200);
@@ -113,6 +114,7 @@ test('rounds: close an ended round, open the next with the same accounts, and ke
   // The writer's page lists round 1's signed piece under round 1.
   const wp = (await anon.get(`/api/w/${page}`)).json;
   assert.deepEqual(wp.posts, []);
+  assert.equal(wp.inRound, false);
   assert.deepEqual(wp.past.map((g) => [g.round, g.posts.map((p) => p.title)]), [[1, ['R1 signed']]]);
   assert.ok(!TIMES.test(JSON.stringify(wp)));
   assert.ok(!TIMES.test(JSON.stringify((await anon.get(`/api/p/${r1.signed.publicId}`)).json)));
@@ -129,6 +131,36 @@ test('rounds: close an ended round, open the next with the same accounts, and ke
   assert.equal((await host2.get(`/api/me/past/post?round=1&id=${r1.secret.id}`)).status, 404, 'not someone else’s');
   assert.deepEqual((await host2.get('/api/me/past')).json.rounds, []);
   assert.equal((await anon.get('/api/me/past')).status, 401);
+
+  // Until they join round 2, a returning writer isn't one of its writers: not on the list of
+  // writers, not in the host's table or the food lists, and can't write. Their round-1 posts above
+  // stayed public all the same.
+  assert.equal((await w2.get('/api/session')).json.user.inRound, false);
+  assert.deepEqual((await anon.get('/api/writers')).json.writers, []);
+  const hostId = app2.app.party.userByUsername('hostuser').id;
+  let hv0 = app2.app.party.hostView(hostId);
+  assert.deepEqual(hv0.writers.map((x) => x.username), ['hostuser']);
+  assert.equal(hv0.returning, 1);
+  assert.deepEqual(peopleOf(app2.app.party).map((x) => x.username), ['hostuser']);
+  for (const [url, body] of [['/api/join', {}], ['/api/post/new', { title: 'x' }]]) {
+    const r = await w2.post(url, body);
+    assert.equal(r.status, 403, url);
+    assert.equal(r.json.code, 'not_in_round', url);
+  }
+  // A new account signs up in round 2: in it at once.
+  const newbie = client(b);
+  assert.equal((await newbie.post('/api/register', { username: 'newbie', password: PASSWORD, name: 'New Person' })).json.user.inRound, true);
+  // The returning writer joins: on the list again (they'd opted in), and in the host's table.
+  const j = await w2.post('/api/round/join', {});
+  assert.equal(j.status, 200);
+  assert.deepEqual([j.json.round, j.json.inRound], [2, true]);
+  assert.equal((await w2.get('/api/session')).json.user.inRound, true);
+  assert.deepEqual((await anon.get('/api/writers')).json.writers.map((x) => x.name), ['Wren Writer']);
+  assert.equal((await anon.get(`/api/w/${page}`)).json.inRound, true);
+  hv0 = app2.app.party.hostView(hostId);
+  assert.deepEqual(hv0.writers.map((x) => x.username).sort(), ['hostuser', 'newbie', 'wren']);
+  assert.equal(hv0.returning, 0);
+  assert.equal((await w2.post('/api/round/join', {})).status, 200, 'joining twice is fine');
 
   // Round 2 runs on its own: only its posts go live, and its anthology is its own.
   const r2 = await playRound(b, app2.app, { host: host2, w: w2, tag: 'R2', onStart: async () => {
@@ -167,6 +199,9 @@ test('rounds: close an ended round, open the next with the same accounts, and ke
   const w3 = client(app3.base);
   await w3.post('/api/login', { username: 'wren', password: PASSWORD });
   assert.deepEqual((await w3.get('/api/me/past')).json.rounds.map((r) => r.n), [2, 1], 'newest round first');
+  // Joining round 2 didn't make them part of round 3.
+  assert.equal((await w3.get('/api/session')).json.user.inRound, false);
+  assert.deepEqual((await c3.get('/api/writers')).json.writers, []);
 });
 
 test('rounds: a round that is running or still in the lobby is not closed, and nothing changes', async (t) => {
@@ -269,4 +304,39 @@ test('rounds: images from an earlier round stay but don’t count towards the qu
   fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify({ v: 1, files }));
   const up = createUploads({ dir, log: quietLog });
   assert.deepEqual(up.usage('uana'), { files: 1, bytes: 100 });
+});
+
+test('rounds: accounts from an earlier round are left out of this round until they join it', () => {
+  const clock = makeClock();
+  const { party } = makeParty({ clock });
+  const host = addUser(party, 'hostuser');
+  const ana = addUser(party, 'ana');
+  const ben = addUser(party, 'ben');
+  for (const u of [host, ana, ben]) party.setPublicProfile(u.id, true);
+  for (const u of [ana, ben]) u.food = { diet: 'vegan', love: 'soup', order: { picks: [], lines: {} } };
+  assert.deepEqual(party.writersView().writers.map((w) => w.name).sort(), ['ANA', 'BEN', 'HOSTUSER']);
+  // As if this were round 2 and all three came from round 1.
+  party.state.party.round = 2;
+  assert.deepEqual([party.inRound(host), party.inRound(ana)], [false, false]);
+  assert.deepEqual(party.writersView().writers, [], 'nobody on round 2’s list of writers yet');
+  assert.deepEqual(party.hostView(host.id).writers.map((w) => w.username), ['hostuser'], 'hosts stay in their own dashboard');
+  assert.equal(party.hostView(host.id).returning, 2);
+  assert.deepEqual(peopleOf(party).map((p) => p.username), ['hostuser'], 'food lists: this round’s people and the hosts');
+  assert.equal(party.wordsTodayNow(true), 0);
+  assert.throws(() => party.join(ana.id), (e) => e.extra?.code === 'not_in_round');
+  assert.equal(party.writerPageView(ana.publicProfile.id).inRound, false, 'their page still opens, without this round’s hours');
+  assert.equal(party.approvalView(ana).inRound, false);
+  party.joinRound(ana.id);
+  assert.equal(party.inRound(ana), true);
+  assert.equal(ana.round, 2);
+  assert.deepEqual(party.writersView().writers.map((w) => w.name), ['ANA']);
+  assert.deepEqual(peopleOf(party).map((p) => p.username).sort(), ['ana', 'hostuser']);
+  assert.deepEqual(party.hostView(host.id).writers.map((w) => w.username).sort(), ['ana', 'hostuser']);
+  assert.equal(party.state.log.at(-1).type, 'round-join');
+  // A host who writes joins like anyone.
+  assert.throws(() => party.join(host.id), (e) => e.extra?.code === 'not_in_round');
+  party.joinRound(host.id);
+  assert.deepEqual(party.writersView().writers.map((w) => w.name).sort(), ['ANA', 'HOSTUSER']);
+  // Signing up in round 2 puts an account in it.
+  assert.equal(party.inRound(addUser(party, 'cleo')), true);
 });

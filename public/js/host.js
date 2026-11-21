@@ -624,7 +624,7 @@ export async function mountHost(root, { session }) {
     const nb = nextBreak();
     const perm = 'Notification' in window ? Notification.permission : 'na';
     const sh = p.phase === 'running' && (!br || modeOf(br) === 'reduce') ? sharedHour() : null;
-    update(top, JSON.stringify([needsEmail(), p.name, p.phase, p.startedAt, p.endedAt, p.plannedEnd, br && [br.label, br.endAt, modeOf(br)], nb && [nb.label, nb.startAt], signUps(), waitingList().length, perm, offline, !!help, sh && [sh.n, sh.startAt, sh.endAt, Math.floor(now() / 60_000)]]), () => {
+    update(top, JSON.stringify([needsEmail(), p.name, p.phase, p.startedAt, p.endedAt, p.plannedEnd, br && [br.label, br.endAt, modeOf(br)], nb && [nb.label, nb.startAt], signUps(), waitingList().length, perm, offline, !!help, sh && [sh.n, sh.startAt, sh.endAt, Math.floor(now() / 60_000)], p.round, p.rounds?.length, v.returning]), () => {
       const nameIn = h('input', { class: 'h-name', value: p.name, 'aria-label': 'Party name (click to rename)', maxlength: 80, spellcheck: 'false' });
       nameIn.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') nameIn.blur();
@@ -657,6 +657,8 @@ export async function mountHost(root, { session }) {
         if (p.plannedEnd) line.push(` · planned end ${clock(p.plannedEnd)}`);
         if (nb) line.push(` · ${nb.label} at ${clock(nb.startAt)}`);
       }
+      // Accounts from earlier rounds aren't in this one until they sign in and join it (lib/rounds.js).
+      if (p.phase !== 'ended' && v.returning) line.push(` · ${plural(v.returning, 'writer')} from earlier rounds can join by signing in`);
       if (p.round > 1 || p.rounds?.length) line.unshift(h('b', null, `Round ${p.round}`), ' · '); // lib/rounds.js
       const phaseCls = br && p.phase === 'running' ? (modeOf(br) === 'reduce' ? 'phase-onbreak' : 'phase-break') : `phase-${p.phase}`;
       let primary = null;
