@@ -79,15 +79,17 @@ const REASON_LABELS = {
 // The rules in six lines, with the party's numbers (lobby).
 export function ruleList(st) {
   const free = st.freePassesPerWriter ?? 1;
+  const carry = st.carryOverMax ?? 0;
   return [
     `Write ${fmtInt(st.targetPerHour ?? 400)} new words each hour.`,
+    carry > 0 ? `Words over the target, up to ${fmtInt(carry)}, carry on to your next hour.` : null,
     `A word counts once it has stayed on the page for ${Math.round(st.settleSec ?? 90)} seconds, so typos and autocorrect never matter.`,
     'Rewriting counts. Moving, retyping or re-pasting your own words doesn’t.',
     `Paste more than ${st.pasteAskOverWords ?? 12} words and you’ll be asked which you wrote today.`,
     'Quotes (lines starting with >) and planning notes count like the rest when they’re your own words.',
     (st.missedHourOutcome === 'alert-only' ? 'Missing an hour is flagged to the host' : 'Miss an hour and you’re out of the challenge (you can keep writing)')
       + (free > 0 ? `; everyone has ${free === 1 ? '1 free hour' : `${free} free hours`}.` : '.'),
-  ];
+  ].filter(Boolean);
 }
 
 export async function mountWriter(root, session) {
@@ -1408,6 +1410,7 @@ export async function mountWriter(root, session) {
       const plain = cur.free || me.me.out; // no target: "≈ 120 words this hour"
       progressBtn.append(bar, h('span', { class: 'w-prog-text' }, ...lead, countEl,
         plain ? h('span', { class: 'w-prog-more' }, ' this hour') : null,
+        !plain && cur.carriedIn >= 1 ? h('span', { class: 'w-prog-more' }, ` (${fmtInt(cur.carriedIn)} carried over)`) : null,
         !plain && cur.credited >= cur.target ? h('span', { class: 'w-met' }, ' · hour met') : null,
         reviewNote(prog),
         tail));
@@ -1432,6 +1435,18 @@ export async function mountWriter(root, session) {
     if (meHour()?.extended) return `Your first hour runs ${span}: you started with under ${me.settings.minFirstHourMin ?? 20} minutes left in that hour, so those minutes joined your first full hour.`;
     return `Your first hour runs ${span}, shorter than the others, so its target is ${fmtInt(hourTarget())} instead of ${fmtInt(meHour()?.baseTarget ?? me.settings.targetPerHour)}.`;
   }
+  // Carryforward: words carried into this hour, and words over its target that go on to the next.
+  function carryNote(c) {
+    const cap = me.settings.carryOverMax ?? 0;
+    if (!cap || c.left || me.me.out) return null;
+    const into = Math.round(c.carriedIn || 0);
+    const next = Math.round(c.carryNext || 0);
+    const parts = [];
+    if (into >= 1) parts.push(`${plural(into, 'word')} carried over from hour ${c.k}.`);
+    if (next >= 1) parts.push(`So far ${plural(next, 'extra word')} ${next === 1 ? 'carries' : 'carry'} on to hour ${c.k + 2}${next >= cap ? ' (the most that can)' : ''}.`);
+    else if (!c.free) parts.push(`Words over the target, up to ${fmtInt(cap)}, carry on to hour ${c.k + 2}.`);
+    return h('p', { class: 'bd-small' }, parts.join(' '));
+  }
   // Hours waiting for the host's check (an hour that reached its target only with flagged words).
   function reviewNote(prog) {
     const ks = prog.hours.filter((x) => x.status === 'review').map((x) => x.k + 1);
@@ -1442,7 +1457,7 @@ export async function mountWriter(root, session) {
   function hourStrip(prog) {
     const nowS = serverNow();
     const strip = h('span', { class: 'w-strip', 'aria-hidden': 'true' });
-    const items = [...prog.hours.map((x) => ({ at: x.startAt, el: h('i', { class: `seg seg-${x.status}`, title: `Hour ${x.k + 1}: ${statusLabel(x.status)}${['met', 'missed', 'review', 'settling'].includes(x.status) ? ` (${fmtInt(x.credited)} / ${fmtInt(x.target)})` : ''}` }) })),
+    const items = [...prog.hours.map((x) => ({ at: x.startAt, el: h('i', { class: `seg seg-${x.status}`, title: `Hour ${x.k + 1}: ${statusLabel(x.status)}${['met', 'missed', 'review', 'settling'].includes(x.status) ? ` (${fmtInt(x.credited)} / ${fmtInt(x.target)}${x.carriedIn >= 1 ? `, ${fmtInt(x.carriedIn)} carried over` : ''})` : ''}` }) })),
       ...breaksShown(nowS).map((b) => ({ at: b.startAt, el: h('i', { class: 'seg seg-break', title: `${b.label}: ${fmtTime(b.startAt)}–${fmtTime(b.endAt)}` }) }))];
     items.sort((a, b) => a.at - b.at);
     for (const it of items) strip.append(it.el);
@@ -1632,7 +1647,8 @@ export async function mountWriter(root, session) {
     const passBtn = passOffer() && me.party.phase === 'running'
       ? h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => { dlg.close(); takePass(); } }, 'Take this hour off…') : null;
     const credit = (b) => h('div', { class: 'bd-grid' },
-      row('Written', b.written, '', true), row('Pasted (yours, today)', b.pasted), row('Cut', b.cut), row('Food form', b.bonus));
+      row('Written', b.written, '', true), row('Pasted (yours, today)', b.pasted), row('Cut', b.cut), row('Food form', b.bonus),
+      b.carried ? row(`Carried over from hour ${cur.k}`, b.carried) : null);
     const inReview = prog.hours.filter((x) => x.status === 'review');
     // The number the footer shows, and what it's made of: counted, and counting soon.
     const hourStory = (c) => {
@@ -1645,6 +1661,7 @@ export async function mountWriter(root, session) {
         soon ? h('p', { class: 'bd-sum' }, `= ${fmtInt(counted)} counted + ${fmtInt(soon)} counting soon`) : null,
         soon ? h('p', { class: 'bd-small' }, `New words count once they’ve stayed on the page for ${Math.round(me.settings.settleSec)} seconds.`) : null,
         firstHourKind(c) ? h('p', { class: 'bd-small' }, firstHourNote(c)) : null,
+        carryNote(c),
       ];
     };
     const body = h('div', { class: 'bd' },

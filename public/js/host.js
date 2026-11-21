@@ -64,6 +64,7 @@ const HOUR_WORD = {
 const MAIN = [
   { k: 'targetPerHour', label: 'Target per hour', unit: 'words', type: 'int', help: 'New words each writer needs every hour.' },
   { k: 'freePassesPerWriter', label: 'Free hours per writer', unit: 'each', type: 'int', help: 'Hours a writer can take off themselves (“Take this hour off”).' },
+  { k: 'carryOverMax', label: 'Carry extra words to the next hour, up to', unit: 'words', type: 'int', optional: true, help: 'Words over an hour’s target count toward the next hour too (flagged words only once you count them). 0: nothing carries.' },
   { k: 'missedHourOutcome', label: 'When a writer misses an hour', type: 'enum', options: [['out', 'They’re out, and you get an alert'], ['alert-only', 'You get an alert; nobody is out']] },
   // Synced hours (SPEC §17): shown once the server reports the setting; options and help are filled in from the settings.
   { k: 'hoursMode', label: 'Hours', type: 'enum', optional: true, options: [['synced', 'Synced to the clock'], ['personal', 'Personal']] },
@@ -977,7 +978,8 @@ export async function mountHost(root, { session }) {
     // One number for the flagged words, everywhere on the card.
     // (the parts add up to the server's "N written": without = written - flagged)
     const flagged = Math.round(r.flagged);
-    const without = Math.max(0, Math.round(r.credit) - flagged);
+    const carried = Math.round(r.carriedIn || 0); // extra words from the hour before: never flagged
+    const without = Math.max(0, Math.round(r.credit + carried) - flagged);
     const bonus = Math.round(r.bonus || 0);
     const n = plural(flagged, 'word');
     // Both answers carry equal weight; the consequence of excluding is spelled out above them.
@@ -992,6 +994,7 @@ export async function mountHost(root, { session }) {
       h('p', { class: 'h-review-sum' },
         `Hour ${r.k + 1} needs ${fmtInt(r.target)} words. ${first} has ${fmtInt(without)} that count for sure; the ${n} flagged by the checks count only if you say so (with them: ${fmtInt(without + flagged)}).`),
       bonus >= 1 ? h('p', { class: 'fd-review-food' }, `Food form: ${plural(bonus, 'word')}, counted outside the checks (they’re part of the ${fmtInt(without)}).`) : null,
+      carried >= 1 ? h('p', { class: 'fd-review-food' }, `Carried over from hour ${r.k}: ${plural(carried, 'extra word')} (part of the ${fmtInt(without)}).`) : null,
       evidenceBlock({ userId: r.userId, first, startAt: r.startAt, endAt: r.endAt, types, evidence: r.evidence || [], pastes: inDrawer && detail && detail.id === r.userId ? detail.pastes : null }),
       h('p', { class: 'h-review-consequence' }, reviewConsequence(r)),
       h('div', { class: 'h-review-actions' }, accept, reject,
@@ -1258,7 +1261,7 @@ export async function mountHost(root, { session }) {
     const s = v.settings;
     const waiting = waitingList().length;
     const declined = queue().filter((x) => x.approval === 'declined');
-    const key = JSON.stringify([p, joinUrl(), signUps(), v.party.registrationOpen, v.party.plannedEnd, s.targetPerHour, s.freePassesPerWriter, s.missedHourOutcome, s.approvalRequired, s.hoursMode, s.syncMinute, s.minFirstHourMin, waiting, declined.map((x) => x.id), setupOpen, !!qr, v.writers.filter((x) => x.isAdmin).map((x) => x.name), v.party.hosts]);
+    const key = JSON.stringify([p, joinUrl(), signUps(), v.party.registrationOpen, v.party.plannedEnd, s.targetPerHour, s.freePassesPerWriter, s.carryOverMax, s.missedHourOutcome, s.approvalRequired, s.hoursMode, s.syncMinute, s.minFirstHourMin, waiting, declined.map((x) => x.id), setupOpen, !!qr, v.writers.filter((x) => x.isAdmin).map((x) => x.name), v.party.hosts]);
     update(setupEl, key, () => {
       const url = joinUrl();
       const n = signUps();
@@ -1301,8 +1304,9 @@ export async function mountHost(root, { session }) {
         act('/api/admin/party', { plannedEnd: t }, t ? `Planned end: ${clock(t)}.` : 'Planned end cleared.');
       });
       const passes = s.freePassesPerWriter ?? 1;
+      const carry = s.carryOverMax ?? 0;
       const rules = [
-        `Everyone writes ${fmtInt(s.targetPerHour)} new words an hour.`,
+        `Everyone writes ${fmtInt(s.targetPerHour)} new words an hour${carry > 0 ? `; up to ${fmtInt(carry)} words over the target carry on to the next hour` : ''}.`,
         synced() ? `Everyone writes on the same clock, ${mm()} to ${mm()}, from the moment they arrive; a late arrival’s first hour is shorter, or has the next hour added.` : hoursRule(),
         s.missedHourOutcome === 'alert-only'
           ? 'A missed hour alerts you; nobody is put out.'
@@ -1569,6 +1573,7 @@ export async function mountHost(root, { session }) {
     const usualTarget = w.targetOverride ?? v.settings.targetPerHour;
     const tip = [`Hour ${cur.k + 1}: ${fmtInt(sure)} of ${fmtInt(cur.target)} words so far.`];
     if (soon >= 1) tip.push(`${fmtInt(counted - flagged)} counted and ${fmtInt(soon)} counting soon (a word counts once it has stayed ${v.settings.settleSec ?? 90} seconds).`);
+    if (cur.carriedIn >= 1) tip.push(`Includes ${fmtInt(cur.carriedIn)} extra words carried over from hour ${cur.k}.`);
     if (flagged >= 1) tip.push(`Plus ${fmtInt(flagged)} flagged words that count only if you say so.`);
     if (cur.target !== usualTarget) tip.push(`This hour’s target is ${fmtInt(cur.target)}${cur.prorated ? ' (a shorter first hour)' : cur.extended ? ' (a longer first hour)' : (cur.reducedBy || []).length ? ' (lowered for a break)' : ''}; the usual one is ${fmtInt(usualTarget)}.`);
     if (cur.free) tip.push('A free hour: nothing is required.');
@@ -1591,7 +1596,8 @@ export async function mountHost(root, { session }) {
   // "46 of 320 counted (+338 to check)": an hour's flagged words apart while they wait for your check.
   function hourNums(x, tail = '') {
     const fl = !x.decision && ['current', 'settling', 'review'].includes(x.status) ? Math.round(x.flagged || 0) : 0;
-    return `${fmtInt(Math.max(0, Math.round(x.credited) - fl))} of ${fmtInt(x.target)}${tail}${fl >= 1 ? ` (+${fmtInt(fl)} to check)` : ''}`;
+    const carried = Math.round(x.carriedIn || 0);
+    return `${fmtInt(Math.max(0, Math.round(x.credited) - fl))} of ${fmtInt(x.target)}${tail}${carried >= 1 ? ` (${fmtInt(carried)} carried over)` : ''}${fl >= 1 ? ` (+${fmtInt(fl)} to check)` : ''}`;
   }
   // Hours (met / missed / free / current) with the breaks between them, as writers see it.
   function stripModel(w) {

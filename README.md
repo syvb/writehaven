@@ -28,7 +28,8 @@ and the front end is plain ES modules plus a few vendored bundles.
   that day. Keyboard mash, lorem ipsum, word salad, repetition, macro-sized inserts and
   machine-steady typing are flagged for the host to check, never silently removed.
 - **Hours**: a target per hour (400 words by default), with hours on the clock for everyone or
-  counted from when each writer first opens the editor. A missed hour puts the writer out of the
+  counted from when each writer first opens the editor. Words over an hour's target, up to 200
+  (a host setting; 0 turns it off), count toward the next hour too. A missed hour puts the writer out of the
   challenge (or only alerts the host); there are free passes, breaks that pause the clock or
   lower the target, and a way to leave the party without being out.
 - **Public pages**: the live page (`/live`) streams the posts being written, anonymous unless

@@ -30,7 +30,7 @@ const DEFAULTS = Object.freeze({
   targetPerHour: 400, hourLengthMin: 60, settleSec: 90, contextWords: 6, reuseWindowMin: 10,
   cutWeight: 0.5, cutMatureMin: 10, cutCapPerHour: null, pasteAskOverWords: 12, shortPastesCount: true,
   ownCutWindowMin: 60, speedCapWpm: 90, dictationCapWpm: 180, bigPasteWords: 100, reviewBigPastes: true,
-  missedHourOutcome: 'out', freePassesPerWriter: 1, personalTargets: false, approvalRequired: true,
+  missedHourOutcome: 'out', freePassesPerWriter: 1, carryOverMax: 200, personalTargets: false, approvalRequired: true,
   syncMinute: 0, minFirstHourMin: 20, // hoursMode: no default here, see hoursModeOf()
 });
 
@@ -102,7 +102,7 @@ function derive(ctx) {
     approvalKnown: role === 'host' && typeof raw.approvalRequired === 'boolean',
     fromServer: !!ctx.fromServer, partyName: ctx.partyName || '', phase: ctx.phase || null,
     target, ownTarget: own, hourMin, settle: num('settleSec'), ask: num('pasteAskOverWords'),
-    shortCount: S.shortPastesCount !== false, passes: num('freePassesPerWriter'),
+    shortCount: S.shortPastesCount !== false, passes: num('freePassesPerWriter'), carry: num('carryOverMax'),
     out: S.missedHourOutcome !== 'alert-only', cutW: num('cutWeight'), cutMin: num('cutMatureMin'), cutCap,
     ctxWords: num('contextWords'), reuseMin: num('reuseWindowMin'), ownCutMin: num('ownCutWindowMin'), speed: num('speedCapWpm'), dictation: num('dictationCapWpm'),
     bigPaste: num('bigPasteWords'), reviewBig: S.reviewBigPastes !== false && Number.isFinite(Number(S.bigPasteWords ?? DEFAULTS.bigPasteWords)),
@@ -156,6 +156,7 @@ function goal(c) {
     hourNow(c),
     c.personalTargets ? P(`After your first hour, your target is tuned between 80% and 125% of ${n(c.target)}, depending on how much you cut and rework compared with everyone else. Your progress always shows it.`) : null,
     c.hourMin === 60 ? P(`That’s about ${n(c.target / 60)} words a minute, spread over the hour.`) : null,
+    c.carry > 0 ? P(B('Extra words carry over. '), `Write more than your target in an hour and the extra, up to ${plural(c.carry, 'word')}, counts toward your next hour as well. Carried words can carry again, but no hour starts with more than ${n(c.carry)}. Nothing carries from a missed hour, and words flagged by the checks carry only if the host counts them.`) : null,
     c.signedIn
       ? P('Your footer keeps score: the bar fills as your words count, and the small blocks beside it are your hours so far. Tap it for the details.')
       : P('Once you’re writing, the footer at the bottom of the page keeps score: a bar for this hour, and a small block for each hour so far.'),
@@ -477,6 +478,7 @@ export function howTonightWorks(settings = {}) {
   lines.push(`A word counts once it has stayed on the page for ${plural(c.settle, 'second')}, so typos and quick changes never cost you.`);
   lines.push('Each word counts once: rewriting counts, but moving, retyping or re-pasting your own words doesn’t.');
   lines.push(`${c.shortCount ? `Pastes of up to ${plural(c.ask, 'word')} count like typing; longer` : `Pastes of up to ${plural(c.ask, 'word')} don’t count; longer`} ones ask which words you wrote today.`);
+  if (c.carry > 0) lines.push(`Words over the target, up to ${plural(c.carry, 'word')}, carry on to your next hour.`);
   lines.push(`${c.out ? 'Miss an hour and you’re out, though you can keep writing' : 'A missed hour is flagged to the host'}${c.passes > 0 ? `; you have ${c.passes === 1 ? 'one free hour' : `${n(c.passes)} free hours`}.` : '.'}`);
   return lines;
 }
