@@ -325,7 +325,7 @@ function formatting(c) {
 function privacy(c) {
   const mode = (dot, name, desc) => h('li', null, h('span', { class: `w-dot dot-${dot}`, 'aria-hidden': 'true' }), h('b', { class: 'hp-mode-name' }, name), h('span', { class: 'hp-mode-desc' }, desc));
   return [
-    P('Each post has its own setting, in the label under its title. You can change it while the party runs; after it ends, a change needs a short reason, which the hosts see.'),
+    P('Each post has its own setting, in the label under its title. You can change it whenever you like, during the party and after it.'),
     h('ul', { class: 'hp-modes' },
       mode('live', 'Public live · no name', 'Every new post starts here. It appears on the live page as you write, with no name on it. Its address is random, but someone watching closely could connect your posts by when they change; for a post you want kept apart, choose “At the end · separate identity”.'),
       mode('named', 'Public live · signed', 'It appears live as you write, with your name on it.'),
@@ -390,7 +390,7 @@ function offline() {
 function after() {
   return [
     P('When the host ends the party, the hours stop for everyone and ', B('the anthology'), ' opens: every published post, separate-identity ones included, in a random order with no times on them, so nothing links one post to another. Anonymous posts stay anonymous; private posts, empty posts and posts the host hid are left out.'),
-    P(B('Changed your mind about a post? '), 'You can still edit it: changes save as you type, they don’t count for the challenge, and the post’s page says “Edited after the party”. Removing a large part at once (50 words or more) asks for a short reason, which the hosts see, and so does changing who sees a post (the label under its title).'),
+    P(B('Changed your mind about a post? '), 'You can still edit it freely, and change who sees it (the label under its title): changes save as you type, they don’t count for the challenge, and the post’s page says “Edited after the party”.'),
     P(B('Something to add? '), 'You can start a new post after the party too (feedback, say). It’s private unless you choose to publish it, and it doesn’t count for the challenge; if you publish it, its page says “Added after the party”.'),
     P(B('Your posts are yours to keep.'), ' From your menu, export one post or all of them, any time: Markdown, plain text, a web page, Word (.docx), PDF (via Print), or an e-book (.epub) of everything.'),
     P('“Copy for LessWrong, Substack or Google Docs” copies a post with its formatting, ready to paste.'),

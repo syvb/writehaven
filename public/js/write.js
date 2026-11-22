@@ -304,9 +304,8 @@ export async function mountWriter(root, session) {
         placeholder: !s || !s.base ? 'This text isn’t on this device yet. It will appear when you’re back online.' : pane === 'body' ? 'Start writing…' : 'Outlines, plans, notes to self…',
         readOnly: !canWrite() || !s || !s.base,
         askOver: () => me.settings.pasteAskOverWords,
-        // After the end, a change that removes 50+ words at once waits for a reason (SPEC §30).
-        // (A post started after the end holds no party text: nothing to ask.)
-        guardCut: () => (me.party.phase === 'ended' && !p.reasoned && !p.added ? (words) => reasonForCut(p, words) : null),
+        // After the end, edits are free (SPEC §30): no change waits for a reason.
+        guardCut: () => null,
         onOps: (ops, wd) => {
           if (!s) return;
           markEdited();
@@ -932,14 +931,10 @@ export async function mountWriter(root, session) {
   }
 
   // ---------------------------------------------------------------- after the party (SPEC §30)
-  // After the end posts stay editable: changes save as you type and never count (the server opens
-  // a quiet edit session with the first one). A change that takes 50 or more words out at once (a
-  // deleted paragraph, a cut, select-all and retype, a paste over a big selection, an undo) asks
-  // for a short reason first: the editor holds it meanwhile (editor.js guardCut), and Cancel leaves
-  // the text as it was. A reason covers the rest of the post's session (p.reasoned, from the
-  // server). If the server still asks for one (the change was typed offline or in another tab, or
-  // the session closed meanwhile), the change waits in its queue on this device until a reason
-  // goes with it. A privacy change asks for a reason of its own.
+  // After the end posts stay freely editable: changes save as you type and never count (the server
+  // opens a quiet edit session with the first one). Nothing asks for a reason, large cuts and
+  // privacy changes included. (The reason machinery below stays for a server that still asks:
+  // a change it refuses waits in its queue on this device until a reason goes with it.)
   const ENDED_DESC = {
     live: 'In the anthology, without your name.',
     named: 'In the anthology, with your name.',
@@ -1080,7 +1075,7 @@ export async function mountWriter(root, session) {
       h('span', { class: 'menu-label' }, h('span', { class: `w-dot dot-${k}`, 'aria-hidden': 'true' }), v.ended),
       h('span', { class: 'menu-desc' }, ENDED_DESC[k])),
     }));
-    items.push('-', { node: h('p', { class: 'menu-note' }, `${p.unlisted ? 'The host has hidden this post. ' : ''}A change after the party needs a short reason, which the hosts see.`) });
+    if (p.unlisted) items.push('-', { node: h('p', { class: 'menu-note' }, 'The host has hidden this post.') });
     menu(privacyBtn, items, { className: 'menu-privacy', onClose: refocus });
   }
   async function privacyAfterParty(p, to) {
@@ -1090,19 +1085,14 @@ export async function mountWriter(root, session) {
       separate: 'It goes in the anthology, kept apart from everything else you wrote today',
       private: 'It leaves the anthology and its own page at once',
     }[to];
-    const reason = await askReason({
-      title: to === 'private' ? 'Make this post private?' : 'Change who sees this post?',
-      lede: `From “${PRIVACY[p.privacy].ended}” to “${PRIVACY[to].ended}”. ${what}${p.unlisted && to !== 'private' ? ', once the host shows it again' : ''}.`,
-      confirmLabel: to === 'private' ? 'Make it private' : 'Change it',
-    });
-    if (!reason) return;
+    // No reason or confirmation: it can be changed back the same way.
     try {
-      await api('/api/post/update', { id: p.id, privacy: to, reason });
+      await api('/api/post/update', { id: p.id, privacy: to });
       p.privacy = to;
       renderPrivacy();
       renderTabs();
       renderAfterBar();
-      toast(to === 'private' ? 'This post is private now: out of the anthology.' : 'Changed: the anthology shows it this way now.');
+      toast(`Changed. ${what}${p.unlisted && to !== 'private' ? ', once the host shows it again' : ''}.`);
     } catch (e) {
       toast(e.network ? 'You seem to be offline. Try again when you’re back.' : e.message, { kind: 'error' });
     }
@@ -1133,7 +1123,7 @@ export async function mountWriter(root, session) {
         ? 'private unless you choose to publish it (the label under the title). Changes save as you type and don’t count for the challenge.'
         : 'published, with “Added after the party” on its page. Changes save as you type and don’t count for the challenge.'));
     } else {
-      fill(afterBarEl, h('p', null, h('strong', null, 'Editing after the party: '), 'changes save as you type and don’t count for the challenge. Removing a large part (50+ words at once) asks for a short reason, shown to the hosts.'));
+      fill(afterBarEl, h('p', null, h('strong', null, 'Editing after the party: '), 'edit freely. Changes save as you type and don’t count for the challenge.'));
     }
   }
   setInterval(() => {

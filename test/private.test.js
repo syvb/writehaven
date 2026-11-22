@@ -60,11 +60,13 @@ test('private is a per-post choice that no public view shows, at any time; hosts
   assert.doesNotMatch(party.exportMarkdown(host.id), /Lantern ledger|mothwing/);
   assert.equal(party.meView(w.id).posts.find((p) => p.id === priv.id).publicId, null);
   assert.match(drawer().body, /mothwing/, 'hosts still read it after the end');
-  assert.throws(() => party.updatePost(w.id, { id: priv.id, privacy: 'live' }), (e) => e.status === 400 && e.extra?.code === 'reason', 'publishing it after the end needs a reason (SPEC §30)');
   assert.equal(party.publicPosts().length, 1);
+  // Its writer can still publish it after the end, with no reason asked (SPEC §30): then it's in.
+  assert.equal(party.updatePost(w.id, { id: priv.id, privacy: 'live' }).privacy, 'live');
+  assert.deepEqual(party.archiveView().posts.map((p) => p.title).sort(), ['An open window', 'Lantern ledger']);
 });
 
-test('after the end a privacy change needs a reason: private takes a post out of the anthology, its page and the export at once; titles and closing stay locked', () => {
+test('after the end a privacy change needs no reason: private takes a post out of the anthology, its page and the export at once; back to public returns it; closing stays locked', () => {
   const { party, clock, host } = setup();
   const w = addUser(party, 'wren');
   party.join(w.id);
@@ -82,38 +84,30 @@ test('after the end a privacy change needs a reason: private takes a post out of
   const published = [live, named, sep].map((p) => p.publicId);
   for (const id of published) assert.ok(party.publicPost(id).title, 'published before');
   const rev = party.publicRev;
-  const reason = (e) => e.status === 400 && e.extra?.code === 'reason';
-  assert.throws(() => party.updatePost(w.id, { id: live.id, privacy: 'private' }), reason, 'no reason, no change (SPEC §30)');
-  assert.throws(() => party.updatePost(w.id, { id: live.id, privacy: 'private', reason: ' o ' }), reason, 'a reason has a few characters');
-  assert.equal(live.privacy, 'live');
-  for (const p of [live, named, sep]) assert.equal(party.updatePost(w.id, { id: p.id, privacy: 'private', reason: 'too personal' }).privacy, 'private');
+  // No reason needed (SPEC §30); one an older page sends is kept for the hosts.
+  assert.equal(party.updatePost(w.id, { id: live.id, privacy: 'private' }).privacy, 'private');
+  assert.equal(party.updatePost(w.id, { id: named.id, privacy: 'private', reason: 'too personal' }).privacy, 'private');
+  assert.equal(party.updatePost(w.id, { id: sep.id, privacy: 'private' }).privacy, 'private');
   assert.ok(party.publicRev > rev, 'a public change: the archive and post-page caches rebuild at once');
   assert.deepEqual(titles(), ['Kept']);
   assert.equal(party.archiveView().counters.posts, 1);
   for (const id of published) assert.throws(() => party.publicPost(id), (e) => e.status === 404, 'its page is gone');
   assert.doesNotMatch(party.exportMarkdown(host.id), /regret/i);
   assert.ok(party.meView(w.id).posts.filter((p) => p.privacy === 'private').every((p) => p.publicId === null));
-  // The way back needs its own reason, like any privacy change after the end.
-  assert.throws(() => party.updatePost(w.id, { id: live.id, privacy: 'live' }), reason, 'private → live');
-  assert.throws(() => party.updatePost(w.id, { id: keep.id, privacy: 'named' }), reason, 'live → named');
-  // Closing never changes after the end. A new title needs no reason (SPEC §30), but nothing
-  // rides along with a privacy change that has none.
+  // Closing never changes after the end. A title can change with a privacy change.
   const ended = (e) => e.status === 409 && e.extra?.code === 'ended';
   assert.throws(() => party.updatePost(w.id, { id: keep.id, closed: true }), ended, 'closing');
-  assert.throws(() => party.updatePost(w.id, { id: keep.id, privacy: 'private', title: 'Renamed' }), reason, 'nothing rides along with private');
-  assert.equal(keep.title, 'Kept');
-  assert.equal(keep.privacy, 'live');
-  assert.equal(live.privacy, 'private');
-  assert.deepEqual(titles(), ['Kept']);
   assert.equal(party.updatePost(w.id, { id: live.id, privacy: 'private' }).privacy, 'private', 'asking again is harmless');
-  // With a reason, a private post comes back to the anthology (usual rules), and hosts see why.
-  assert.equal(party.updatePost(w.id, { id: sep.id, privacy: 'named', reason: 'proud of it after all' }).privacy, 'named');
-  assert.deepEqual(titles(), ['Kept', 'Separate regret']);
-  assert.equal(party.archiveView().posts.find((p) => p.title === 'Separate regret').name, 'WREN');
+  // The way back: a private post returns to the anthology (usual rules), and hosts see each change.
+  assert.equal(party.updatePost(w.id, { id: sep.id, privacy: 'named', title: 'Separate regret, signed' }).privacy, 'named');
+  assert.deepEqual(titles(), ['Kept', 'Separate regret, signed']);
+  assert.equal(party.archiveView().posts.find((p) => p.title === 'Separate regret, signed').name, 'WREN');
   const hist = party.hostWriter(host.id, w.id).posts.find((p) => p.id === sep.id).after;
-  assert.deepEqual(hist.map((e) => [e.kind, e.from, e.to, e.reason]), [['privacy', 'separate', 'private', 'too personal'], ['privacy', 'private', 'named', 'proud of it after all']]);
-  assert.ok(party.state.log.some((l) => l.type === 'after-privacy' && /proud of it after all/.test(l.text)), 'the host log has the reason');
-  assert.doesNotMatch(JSON.stringify([party.archiveView(), party.liveView()]), /too personal|proud of it/, 'reasons never go public');
+  assert.deepEqual(hist.filter((e) => e.kind === 'privacy').map((e) => [e.from, e.to, e.reason]), [['separate', 'private', null], ['private', 'named', null]]);
+  const nh = party.hostWriter(host.id, w.id).posts.find((p) => p.id === named.id).after;
+  assert.deepEqual(nh.map((e) => [e.kind, e.reason]), [['privacy', 'too personal']]);
+  assert.ok(party.state.log.some((l) => l.type === 'after-privacy' && /too personal/.test(l.text)), 'the host log has a reason when one was given');
+  assert.doesNotMatch(JSON.stringify([party.archiveView(), party.liveView()]), /too personal/, 'reasons never go public');
   // It still counts, and hosts still read it.
   assert.ok(party.scoreOf(w.id, { fresh: true }).totals.credit > 0);
   assert.match(party.hostWriter(host.id, w.id).posts.find((p) => p.id === live.id).body, /regretted/);
@@ -330,20 +324,19 @@ test('over HTTP: a private post is never in /api/live, the stream, /api/p, the a
   assert.match((await host.get(`/api/admin/writer?id=${reg.json.user.id}`)).json.posts.find((p) => p.id === priv.id).body, /mothwing/);
 
   // Still after the end: live → private takes a published post out of the archive, its page and
-  // export.md in the very next request; private → live is refused.
+  // export.md in the very next request, with no reason asked (SPEC §30).
   assert.match((await host.get('/api/admin/export.md')).text, /Open window/);
-  assert.equal((await w.post('/api/post/update', { id: open.id, privacy: 'private' })).json.code, 'reason', 'a reason is asked for (SPEC §30)');
-  const r = await w.post('/api/post/update', { id: open.id, privacy: 'private', reason: 'changed my mind' });
+  const r = await w.post('/api/post/update', { id: open.id, privacy: 'private' });
   assert.equal(r.status, 200);
   assert.equal(r.json.post.privacy, 'private');
   assert.deepEqual((await anon.get('/api/archive')).json.posts.map((p) => p.title), ['Second thoughts']);
   assert.equal((await anon.get(`/api/p/${open.publicId}`)).status, 404);
   assert.doesNotMatch((await host.get('/api/admin/export.md')).text, /Open window|Streaming words/);
-  const back = await w.post('/api/post/update', { id: open.id, privacy: 'live' });
-  assert.equal(back.status, 400, 'private → live without a reason');
-  assert.equal(back.json.code, 'reason');
   // A new title needs no reason after the end (SPEC §30): the anthology shows it at once.
   assert.equal((await w.post('/api/post/update', { id: moving.id, title: 'Renamed' })).status, 200, 'a title needs no reason');
   assert.deepEqual((await anon.get('/api/archive')).json.posts.map((p) => p.title), ['Renamed']);
   assert.equal((await anon.get(`/api/p/${open.publicId}`)).status, 404);
+  // And back to public, again with no reason: its page returns.
+  assert.equal((await w.post('/api/post/update', { id: open.id, privacy: 'live' })).status, 200);
+  assert.equal((await anon.get(`/api/p/${open.publicId}`)).status, 200);
 });

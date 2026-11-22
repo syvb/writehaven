@@ -31,7 +31,6 @@ let n = 0;
 const batch = (p, pane, ops) => ({ postId: p.id, pane, baseVersion: p.ver[pane], seq: `t${++n}`, ops });
 // n distinct words: "tag1 tag2 …".
 const words = (count, tag) => Array.from({ length: count }, (_, i) => `${tag}${i + 1}`).join(' ');
-const needsReason = (e) => e.status === 409 && e.extra?.code === 'reason-needed';
 const history = (party, host, w, p) => party.hostWriter(host.id, w.id).posts.find((x) => x.id === p.id).after.map((e) => [e.kind, e.reason ?? null, e.words ?? null]);
 const session = (party, w, p) => {
   const m = party.meView(w.id).posts.find((x) => x.id === p.id);
@@ -124,7 +123,7 @@ test('after the party: changes save with no reason, in a quiet session; they nev
   assert.throws(() => party.updatePost(w.id, { id: p.id, closed: true }), (e) => e.status === 409 && e.extra.code === 'ended');
 });
 
-test('after the party, a change that removes 50+ words needs a reason: refused with nothing changed, then accepted; the reason covers the session; hosts see it, the public never does', () => {
+test('after the party, a change that removes 50+ words goes in with no reason; hosts see it in the post’s history; a reason an older page sends is kept for them, never public', () => {
   const { party, clock, host } = setup();
   const w = addUser(party, 'wren', 'Wren');
   party.join(w.id);
@@ -140,57 +139,34 @@ test('after the party, a change that removes 50+ words needs a reason: refused w
   party.tick();
   const score = scoreOf(party, w.id);
 
-  // 49 words at once: no reason.
+  // 49 words at once: a quiet edit.
   party.applyOps(w.id, batch(p, 'body', [{ pos: A.length + 2, del: B.length + 2, ins: '' }]));
   assert.equal(p.body, [A, C, D].join('\n\n'));
   assert.deepEqual(session(party, w, p), [true, false]);
   assert.deepEqual(history(party, host, w, p), [['edit', null, null]]);
-
-  const notes = words(55, 'note');
-  party.applyOps(w.id, batch(p, 'notes', [{ pos: 0, del: 0, ins: notes }]));
-  // 50 or more: refused, and nothing changes (text, version, op log, history, the batch's id).
-  const snapshot = () => JSON.stringify([p.body, p.ver, p.seq, p.words, party.state.ops[w.id].length, p.after, party.state.log.length]);
-  const was = snapshot();
-  const cutA = batch(p, 'body', [{ pos: 0, del: A.length + 2, ins: '' }]);
-  assert.throws(() => party.applyOps(w.id, cutA), (e) => needsReason(e) && e.extra.words === 60 && e.extra.editing === true);
-  assert.throws(() => party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: A.length, ins: words(60, 'new') }])), needsReason, 'a paste over a large selection');
-  assert.throws(() => party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: p.body.length, ins: 'X' }])), (e) => needsReason(e) && e.extra.words === 190, 'select all and retype');
-  assert.throws(() => party.applyOps(w.id, batch(p, 'notes', [{ pos: 0, del: p.notes.length, ins: '' }])), needsReason, 'in the planning notes too');
-  assert.throws(() => party.applyOps(w.id, batch(p, 'body', [{ pos: p.body.length, del: 0, ins: ' fine' }, { pos: 0, del: A.length + 2, ins: '' }])), needsReason, 'a batch is all or nothing');
-  assert.equal(snapshot(), was, 'nothing changed');
-  // Typing and backspacing never ask, however much they take out one by one.
-  for (let i = 0; i < 12; i++) party.applyOps(w.id, batch(p, 'body', [{ pos: p.body.length - 1, del: 1, ins: '' }]));
-  assert.ok(p.body.endsWith(words(70, 'delta').slice(0, -12)));
-  // A move (a paragraph dragged elsewhere) takes nothing out.
-  party.applyOps(w.id, batch(p, 'body', [{ pos: p.body.length, del: 0, ins: `\n\n${C}` }, { pos: A.length, del: C.length + 2, ins: '' }]));
-  assert.ok(p.body.endsWith(`\n\n${C}`) && p.body.startsWith(`${A}\n\ndelta1 `));
-
-  // A reason opens the way: the same batch, resent as it was, goes in.
-  assert.throws(() => party.openAfterEdit(w.id, { id: p.id, reason: ' ok ' }), (e) => e.status === 400 && e.extra.code === 'reason');
+  // 60 at once: in at once, nothing asked; the hosts' history notes the cut.
+  party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: A.length + 2, ins: '' }]));
+  assert.equal(p.body, [C, D].join('\n\n'));
+  assert.deepEqual(history(party, host, w, p), [['edit', null, null], ['cut', null, 60]]);
+  assert.ok(party.state.log.some((l) => l.type === 'after-cut' && l.text === 'removed about 60 words from “Harbour” after the party'));
+  // Select all and retype, and the planning notes: in too.
+  party.applyOps(w.id, batch(p, 'notes', [{ pos: 0, del: 0, ins: words(55, 'note') }]));
+  party.applyOps(w.id, batch(p, 'notes', [{ pos: 0, del: p.notes.length, ins: 'X' }]));
+  assert.equal(p.notes, 'X');
+  // A page from before reasons became optional may still send one: the session carries it and
+  // the hosts see it with the next large cut.
   assert.deepEqual(party.openAfterEdit(w.id, { id: p.id, reason: 'cutting the opening' }), { editing: true, reasoned: true });
-  assert.deepEqual(session(party, w, p), [true, true]);
-  const cutA2 = batch(p, 'body', [{ pos: 0, del: A.length + 2, ins: '' }]);
-  party.applyOps(w.id, { ...cutA2, seq: cutA.seq });
-  assert.ok(p.body.startsWith('delta1 '));
-  assert.deepEqual(history(party, host, w, p), [['edit', null, null], ['cut', 'cutting the opening', 60]]);
-  assert.ok(party.state.log.some((l) => l.type === 'after-cut' && l.text === 'removed about 60 words from “Harbour” after the party: “cutting the opening”'));
-  // It covers the session: another large cut goes in, and is listed with it.
-  party.applyOps(w.id, batch(p, 'body', [{ pos: p.body.length - C.length - 2, del: C.length + 2, ins: '' }]));
-  assert.equal(p.body, words(70, 'delta').slice(0, -12));
+  party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: C.length + 2, ins: '' }]));
+  assert.equal(p.body, D);
   assert.deepEqual(history(party, host, w, p).at(-1), ['cut', 'cutting the opening', 60]);
-
-  // A new session after it closes is quiet again.
+  // A new session after the last one closes: still nothing asked.
   clock.advance(31 * MIN);
   assert.deepEqual(session(party, w, p), [false, false]);
-  const all = batch(p, 'body', [{ pos: 0, del: p.body.length, ins: 'Gone.' }]);
-  assert.throws(() => party.applyOps(w.id, all), (e) => needsReason(e) && e.extra.editing === false);
-  assert.deepEqual(session(party, w, p), [false, false], 'a refused change opens nothing');
-  party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: 0, ins: 'And ' }]));
+  party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: p.body.length, ins: 'Gone.' }]));
+  assert.equal(p.body, 'Gone.');
   assert.deepEqual(session(party, w, p), [true, false]);
-  assert.throws(() => party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: p.body.length, ins: 'Gone.' }])), needsReason);
-  assert.deepEqual(history(party, host, w, p).map((e) => e[0]), ['edit', 'cut', 'cut', 'edit']);
 
-  // Never counted; the reason never public.
+  // Never counted; a reason never public.
   assert.equal(scoreOf(party, w.id), score);
   party.rebuildEngine({ sync: true });
   assert.equal(scoreOf(party, w.id), score);
@@ -198,7 +174,7 @@ test('after the party, a change that removes 50+ words needs a reason: refused w
   assert.doesNotMatch(JSON.stringify([party.publicPost(p.publicId), party.archiveView(), party.liveView(), party.exportMarkdown(host.id)]), /cutting the opening/);
 });
 
-test('after the party, a privacy change still needs its own reason', () => {
+test('after the party, a privacy change needs no reason; one an older page sends is kept for the hosts', () => {
   const { party, clock, host } = setup();
   const w = addUser(party, 'wren');
   party.join(w.id);
@@ -206,15 +182,13 @@ test('after the party, a privacy change still needs its own reason', () => {
   typeInto(party, clock, w, p, 'words written during the party', { cps: 10 });
   party.end(host.id);
   clock.advance(MIN);
-  const reason = (e) => e.status === 400 && e.extra?.code === 'reason';
-  assert.throws(() => party.updatePost(w.id, { id: p.id, privacy: 'private' }), reason);
-  party.applyOps(w.id, batch(p, 'body', [{ pos: 0, del: 0, ins: 'Edited: ' }])); // an open session doesn't stand in for it
-  assert.throws(() => party.updatePost(w.id, { id: p.id, privacy: 'private' }), reason);
-  assert.throws(() => party.updatePost(w.id, { id: p.id, privacy: 'private', title: 'Renamed' }), reason, 'nothing rides along without it');
-  assert.equal(p.privacy, 'live');
-  assert.equal(p.title, 'Second thoughts');
-  assert.equal(party.updatePost(w.id, { id: p.id, privacy: 'private', reason: 'too personal' }).privacy, 'private');
-  assert.deepEqual(history(party, host, w, p), [['edit', null, null], ['privacy', 'too personal', null]]);
+  assert.equal(party.updatePost(w.id, { id: p.id, privacy: 'private' }).privacy, 'private');
+  assert.equal(party.updatePost(w.id, { id: p.id, privacy: 'live', title: 'Renamed', reason: 'proud of it after all' }).privacy, 'live');
+  assert.equal(p.title, 'Renamed');
+  const h = history(party, host, w, p);
+  assert.deepEqual(h.filter((e) => e[0] === 'privacy'), [['privacy', null, null], ['privacy', 'proud of it after all', null]]);
+  assert.ok(party.state.log.some((l) => l.type === 'after-privacy' && l.text === 'changed “Second thoughts” after the party from public, no name to private'));
+  assert.doesNotMatch(JSON.stringify([party.publicPost(p.publicId), party.archiveView()]), /proud of it/);
 });
 
 test('during the party nothing changes: no reason for large cuts, none asked or accepted, every change scored', () => {
@@ -251,7 +225,7 @@ test('a post nobody edits after the party has no note; only the public text earn
   assert.deepEqual(history(party, host, w, p), [['edit', null, null]], 'hosts still see the session');
 });
 
-test('over HTTP: edits after the party save with no reason, a large cut asks for one and goes in when resent, the note and the history, the score stays; all of it survives a restart', async (t) => {
+test('over HTTP: edits after the party save with no reason, large cuts and privacy changes too; the note and the history, the score stays; all of it survives a restart', async (t) => {
   const open = new Set();
   t.after(async () => { for (const a of open) await a.close(); });
   const boot = async (o) => {
@@ -285,25 +259,12 @@ test('over HTTP: edits after the party save with no reason, a large cut asks for
   assert.equal(r.json.version, 2);
   const m = await mine(w);
   assert.deepEqual([m.editing, m.reasoned], [true, false]);
-  // A large cut: refused, with how many words, and nothing changes.
+  // A large cut: in at once, no reason asked.
   const cut = { postId: post.id, pane: 'body', baseVersion: 2, seq: 'a3', sentAt: Date.now(), ops: [{ at: Date.now(), pos: 0, del: opening.length + 2, ins: '' }] };
-  r = await w.post('/api/ops', cut);
-  assert.equal(r.status, 409);
-  assert.equal(r.json.code, 'reason-needed');
-  assert.equal(r.json.words, 55);
-  const edited1 = `${body} And then.`;
-  assert.equal((await w.get(`/api/post?id=${post.id}&pane=body`)).json.text, edited1);
-  assert.equal((await w.get(`/api/post?id=${post.id}&pane=body`)).json.version, 2);
-  // The reason, then the same batch again: in.
-  r = await w.post('/api/post/after-party', { id: post.id, reason: '' });
-  assert.equal(r.status, 400);
-  assert.equal(r.json.code, 'reason');
-  r = await w.post('/api/post/after-party', { id: post.id, reason: 'the list was a placeholder' });
-  assert.equal(r.status, 200);
-  assert.deepEqual([r.json.editing, r.json.reasoned], [true, true]);
   r = await w.post('/api/ops', cut);
   assert.equal(r.status, 200);
   assert.equal(r.json.version, 3);
+  const edited1 = `${body} And then.`;
   const edited = edited1.slice(opening.length + 2);
   const check = async (base, label) => {
     const anon = client(base);
@@ -312,22 +273,21 @@ test('over HTTP: edits after the party save with no reason, a large cut asks for
     assert.equal(page.edited, true, `${label}: the note`);
     const archive = (await anon.get('/api/archive')).json;
     assert.equal(archive.posts[0].edited, true, `${label}: the anthology's note`);
-    assert.doesNotMatch(JSON.stringify([page, archive]), /placeholder/, `${label}: never the reason`);
   };
   await check(first.base, 'first');
   const hostSees = async (c, label) => {
     const d = (await c.get(`/api/admin/writer?id=${uid}`)).json;
-    assert.deepEqual(d.posts[0].after.map((e) => [e.kind, e.reason, e.words ?? null]), [['edit', null, null], ['cut', 'the list was a placeholder', 55]], label);
+    assert.deepEqual(d.posts[0].after.map((e) => [e.kind, e.reason, e.words ?? null]), [['edit', null, null], ['cut', null, 55]], label);
     const log = (await c.get('/api/admin/state')).json.log;
     assert.ok(log.some((l) => l.type === 'after-edit' && /edited “Harbour” after the party/.test(l.text)), `${label}: the host log`);
-    assert.ok(log.some((l) => l.type === 'after-cut' && /removed about 55 words.*the list was a placeholder/.test(l.text)), `${label}: the host log`);
+    assert.ok(log.some((l) => l.type === 'after-cut' && l.text === 'removed about 55 words from “Harbour” after the party'), `${label}: the host log`);
   };
   await hostSees(host, 'first');
   assert.equal(JSON.stringify((await w.get('/api/me')).json.progress), score0, 'the score is unchanged');
   await sleep(100);
   await first.close();
 
-  // A restart: the text, the note, the history and the open session (with its reason) remain.
+  // A restart: the text, the note, the history and the open session remain.
   const second = await boot({ stateFile: first.stateFile });
   await check(second.base, 'after a restart');
   const host2 = client(second.base);
@@ -337,14 +297,12 @@ test('over HTTP: edits after the party save with no reason, a large cut asks for
   await w2.post('/api/login', { username: 'wren', password: 'longpassword' });
   assert.equal(JSON.stringify((await w2.get('/api/me')).json.progress), score0, 'the score is unchanged after a restart');
   const m2 = await mine(w2);
-  assert.deepEqual([m2.editing, m2.reasoned], [true, true], 'the session and its reason');
+  assert.deepEqual([m2.editing, m2.reasoned], [true, false], 'the session');
   assert.equal((await w2.get(`/api/post?id=${post.id}&pane=body`)).json.text, edited);
   r = await w2.post('/api/ops', { postId: post.id, pane: 'body', baseVersion: 3, seq: 'a4', sentAt: Date.now(), ops: [{ at: Date.now(), pos: 0, del: 3, ins: 'Our' }] });
   assert.equal(r.status, 200);
-  // A privacy change after the end still asks for a reason of its own.
+  // A privacy change after the end: no reason either.
   r = await w2.post('/api/post/update', { id: post.id, privacy: 'private' });
-  assert.equal(r.json.code, 'reason');
-  r = await w2.post('/api/post/update', { id: post.id, privacy: 'private', reason: 'on second thoughts' });
   assert.equal(r.status, 200);
   assert.equal((await client(second.base).get(`/api/p/${publicId}`)).status, 404);
   assert.deepEqual((await client(second.base).get('/api/archive')).json.posts, []);
@@ -355,7 +313,7 @@ test('over HTTP: edits after the party save with no reason, a large cut asks for
   await host3.post('/api/login', { username: 'hostuser', password: 'longpassword' });
   const d = (await host3.get(`/api/admin/writer?id=${uid}`)).json.posts[0];
   assert.equal(d.body, `Our${edited.slice(3)}`, 'the text after two restarts');
-  assert.deepEqual(d.after.map((e) => [e.kind, e.reason, e.from ?? null, e.to ?? null]), [['edit', null, null, null], ['cut', 'the list was a placeholder', null, null], ['privacy', 'on second thoughts', 'live', 'private']]);
+  assert.deepEqual(d.after.map((e) => [e.kind, e.reason, e.from ?? null, e.to ?? null]), [['edit', null, null, null], ['cut', null, null, null], ['privacy', null, 'live', 'private']]);
   await third.close();
 });
 
@@ -411,8 +369,7 @@ test('after the party a writer can start a new post: private until they publish 
   assert.deepEqual(row.after.map((e) => e.kind), ['added'], 'its start, not each session');
   assert.ok(party.state.log.some((l) => l.type === 'after-new' && l.userId === w.id));
 
-  // Published (with a reason, like any privacy change after the end): "Added after the party".
-  assert.throws(() => party.updatePost(w.id, { id: p.id, privacy: 'live' }), (e) => e.status === 400 && e.extra.code === 'reason');
+  // Published (a reason is optional, as for any privacy change after the end): "Added after the party".
   party.updatePost(w.id, { id: p.id, privacy: 'live', reason: 'sharing my feedback' });
   party.updatePost(w.id, { id: p.id, title: 'Feedback, revised' });
   const page = party.publicPost(p.publicId);
