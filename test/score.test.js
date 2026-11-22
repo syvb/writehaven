@@ -729,3 +729,17 @@ test('fast enough: a 10,000-word post and 20,000 keystrokes', () => {
   const ms = Date.now() - t0;
   assert.ok(ms < 6000, `took ${ms} ms`);
 });
+
+test('ctx.trustPastes: big pastes are neither flagged nor sent to review', () => {
+  const article = Array.from({ length: 20 }, (_, i) => `Report ${i} says the ${i * 7 % 97}th survey of district ${i} found nothing new.`).join(' ');
+  const ed = new Ed();
+  ed.paste(0, article, 'all'); // about 200 words, claimed: the hour needs 100+ of them
+  const checked = run(ed, { targetPerHour: 150 }, { now: 62 * MIN });
+  assert.ok(checked.hours[0].flags.some((f) => f.type === 'bigPaste'));
+  assert.equal(checked.hours[0].status, 'review');
+  const trusted = run(ed, { targetPerHour: 150 }, { now: 62 * MIN, trustPastes: true });
+  assert.ok(!trusted.hours[0].flags.some((f) => f.type === 'bigPaste'));
+  assert.equal(trusted.hours[0].flaggedCredit, 0);
+  assert.equal(trusted.hours[0].status, 'met');
+  assert.equal(trusted.hours[0].credit, checked.hours[0].credit, 'the same words count');
+});

@@ -633,3 +633,43 @@ test('a break added mid-party scores the same in place as a full re-score', asyn
   assert.deepEqual(live.hours.map((h) => [h.k, h.startAt, h.endAt, h.credit]), replayed.hours.map((h) => [h.k, h.startAt, h.endAt, h.credit]));
   assert.equal(live.hours[0].endAt - live.hours[0].startAt, 15 * MIN, 'hour 1 stretched by the 5-minute break');
 });
+
+test('a writer whose pastes the host trusts: never flagged as a big paste; an hour waiting on one is met', () => {
+  const { party, clock, host } = setup({ targetPerHour: 150 });
+  const w = addUser(party, 'ana', 'Ana');
+  const b = addUser(party, 'bob', 'Bob');
+  for (const x of [w, b]) party.join(x.id);
+  const pw = party.newPost(w.id, {});
+  const pb = party.newPost(b.id, {});
+  pasteInto(party, w, pw, realProse(190, 0), 'all'); // the hour needs 150 of them (§12: >= 100)
+  pasteInto(party, b, pb, realProse(190, 200), 'all');
+  clock.set(w.joinedAt + 10 * MIN + JUDGED);
+  party.tick();
+  assert.deepEqual([status(party, w.id)[0], status(party, b.id)[0]], ['review', 'review']);
+  assert.equal(party.hostView(host.id).reviews.length, 2);
+  // Only hosts, only true or false.
+  assert.throws(() => party.adminWriter(w.id, { id: w.id, trustPastes: true }));
+  assert.throws(() => party.adminWriter(host.id, { id: w.id, trustPastes: 'yes' }), /true or false/);
+  party.adminWriter(host.id, { id: w.id, trustPastes: true });
+  party.tick();
+  assert.equal(status(party, w.id)[0], 'met', 'her big paste counts without a check');
+  assert.equal(status(party, b.id)[0], 'review', 'Bob is still checked');
+  const r = party.scoreOf(w.id, { fresh: true });
+  assert.ok(!r.hours[0].flags.some((f) => f.type === 'bigPaste'), 'no big-paste flag');
+  assert.equal(r.hours[0].flaggedCredit, 0);
+  const hv = party.hostView(host.id);
+  assert.deepEqual(hv.reviews.map((x) => x.userId), [b.id]);
+  assert.equal(hv.writers.find((x) => x.id === w.id).trustPastes, true);
+  assert.equal(hv.writers.find((x) => x.id === b.id).trustPastes, false);
+  const al = party.state.alerts.find((a) => a.userId === w.id && a.kind === 'review');
+  assert.ok(al.ack && al.autoResolved, 'her review alert closes by itself');
+  assert.ok(party.state.log.some((l) => l.type === 'trust-pastes' && l.userId === w.id));
+  // Later pastes aren't flagged either; a background re-score keeps it.
+  party.rebuildEngine({ sync: true });
+  assert.equal(status(party, w.id)[0], 'met');
+  // Switched off: checked again like everyone's (the hour waits for a check once more).
+  party.adminWriter(host.id, { id: w.id, trustPastes: false });
+  party.tick();
+  assert.equal(status(party, w.id)[0], 'review');
+  assert.equal(w.out, false);
+});

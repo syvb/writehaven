@@ -1524,6 +1524,7 @@ export async function mountHost(root, { session }) {
       strip: stripModel(w),
       target: [w.targetOverride ?? null, v.settings.targetPerHour],
       carry: [w.carryOverride ?? null, v.settings.carryOverMax ?? null],
+      trust: w.trustPastes ?? null,
       flags,
       words: Math.round(w.totals?.credit || 0),
       met: w.progress ? [w.progress.met, w.progress.missed, w.progress.free, w.progress.review] : null,
@@ -1937,6 +1938,19 @@ export async function mountHost(root, { session }) {
       h('p', { class: 'h-drawer-target' }, tIn, ` words an hour ${own === null ? '(the default)' : `(their own; the default is ${fmtInt(def)})`}`),
       cur && !cur.free && cur.target !== (own ?? def) ? h('p', { class: 'h-sub' }, `This hour’s target is ${fmtInt(cur.target)}${cur.prorated ? ' (a shorter first hour)' : cur.extended ? ' (a longer first hour)' : (cur.reducedBy || []).length ? ' (lowered for a break)' : ''}.`) : null,
       h('p', { class: 'h-sub' }, own === null ? 'Change it for this writer only (you’ll see what it changes first). Empty it later to go back to the default.' : 'Empty the box to go back to the default.')));
+
+    // Pastes: a writer whose pastes the host trusts is never flagged for a big paste (lib/score.js).
+    if (typeof w.trustPastes === 'boolean') {
+      const tSw = h('input', { type: 'checkbox', role: 'switch', checked: w.trustPastes, 'aria-describedby': `h-trust-${w.id}` });
+      tSw.addEventListener('change', () => act('/api/admin/writer', { id: w.id, trustPastes: tSw.checked }, tSw.checked
+        ? `${first}’s pastes are trusted: no more big-paste checks.`
+        : `${first}’s pastes are checked again like everyone’s.`));
+      out.push(h('section', { class: 'h-dsec' }, h('h3', null, 'Pastes'),
+        h('label', { class: 'h-switch' }, tSw, h('span', null, w.trustPastes ? 'Their pastes are trusted' : 'Trust their pastes')),
+        h('p', { class: 'h-sub', id: `h-trust-${w.id}` }, w.trustPastes
+          ? `${first}’s pasted words are never flagged as a big paste, so an hour that needs them doesn’t wait for your check. Other checks still apply. Switch it off to check their pastes again.`
+          : `For a writer who writes elsewhere and pastes it in: their pasted words are never flagged as a big paste, including hours already waiting for your check. Other checks (keyboard mash, lorem ipsum, late offline work) still apply.`)));
+    }
 
     // Carryover (lib/progress.js carryCap): shown once the server reports the setting.
     if (v.settings.carryOverMax !== undefined) {
