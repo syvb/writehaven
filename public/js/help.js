@@ -130,7 +130,7 @@ export function setBrainstormOpener(fn) {
 }
 
 // "about 7 words a minute"; "hours of 60 minutes" only matters on test parties.
-const hourWord = (c) => (c.hourMin === 60 ? 'hour' : `hour (${plural(c.hourMin, 'minute')} tonight)`);
+const hourWord = (c) => (c.hourMin === 60 ? 'hour' : `hour (${plural(c.hourMin, 'minute')} at this party)`);
 
 // ------------------------------------------------------------------------------- sections
 // Each: { id, title, when(c), teaser(c), body(c) -> nodes }. Short paragraphs; a "why" where
@@ -273,7 +273,7 @@ function pasting(c) {
     P(`Paste more than ${plural(c.ask, 'word')} and you’ll be asked: “Did you write any of this today, for this party?” If you didn’t, it goes in without counting. If you did, pick the parts that are yours: tap a sentence to switch it on or off, drag across words, or use the button beside each paragraph. A counter shows how many words will count.`),
     P('Some words can’t be picked, and the dialog marks them: words you’ve already been credited for, and words that match another writer’s text. If none of it could count, it goes straight in without asking.'),
     P(B('Pasting your own words again never counts'), `, whatever the length: text in any of your posts or notes, ${mineAgain}, or anything you’ve pasted before.`),
-    P(B('Why ask at all? '), 'Tonight is about writing done tonight, so pasted text counts only when you say it’s yours, from today.'),
+    P(B('Why ask at all? '), 'The party is about writing done today, so pasted text counts only when you say it’s yours, from today.'),
     c.reviewBig ? P(`If an hour needs ${n(c.bigPaste)} or more pasted words to reach the target, the host takes a quick look before it counts as met.`) : null,
     P('Formatting comes with you: pasting from Google Docs, Word, Notion, Apple Notes or a web page keeps headings, bold, italic, links and lists. Opening a file (.md, .txt, .docx, .html) or dropping one in asks the same question as a paste.'),
   ];
@@ -362,11 +362,11 @@ function missed(c) {
   return [
     c.out
       ? P(B('If an hour ends below your target, you’re out of the challenge.'), ' You can keep writing: your posts still stream and go in the anthology. The host can let you back in, but only for a very good reason.')
-      : P(B('If an hour ends below your target, the host is told.'), ' Nobody is put out tonight.'),
+      : P(B('If an hour ends below your target, the host is told.'), ' Nobody is put out of the challenge.'),
     P('If you’re falling behind, you’ll get a gentle warning with 15 and with 5 minutes to go.'),
     c.passes > 0
       ? P(B('Free hours. '), `You have ${c.passes === 1 ? 'one free hour' : `${n(c.passes)} free hours`}. “Take this hour off”, in your menu, in the details or in the warning, excuses this hour, at any point in it, or the next one if you choose. What you write still counts and is published. The host can give you more.`)
-      : P(B('Free hours. '), 'There are none to take tonight, but the host can give you one.'),
+      : P(B('Free hours. '), 'There are none to take at this party, but the host can give you one.'),
     P('An hour waiting for the host’s review never puts you out by itself, and an hour cut short by the end of the party never counts as missed.'),
     h('h4', { class: 'hp-sub-h' }, 'Breaks'),
     P('The host can call a break for everyone, say for dinner. Writing is never blocked, and words written during a break still count. A break works in one of two ways:'),
