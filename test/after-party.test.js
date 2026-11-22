@@ -1,8 +1,7 @@
-// SPEC §30: after the party ends, posts stay editable with no reason asked: the first change opens
-// a quiet edit session, changes save as they come and never count for the challenge, and the
-// public page says "Edited after the party". One change that takes 50 or more words out at once
-// needs a short reason, which the hosts see (a reason covers the rest of its session); so does a
-// privacy change.
+// SPEC §30: after the party ends, posts stay freely editable with no reason asked: the first
+// change opens a quiet edit session, changes save as they come and never count for the challenge,
+// and the public page says "Edited after the party". A change that takes 50 or more words out at
+// once is noted in the post's history for the hosts; a reason is optional (older pages send one).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeParty, addUser, typeInto, pasteInto, startApp, client, sleep } from './helpers.js';

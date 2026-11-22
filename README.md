@@ -41,7 +41,7 @@ and the front end is plain ES modules plus a few vendored bundles.
   to check, approval of new accounts, co-hosts, breaks, scoring settings with a preview of what a
   change would do, messages to everyone or to groups (on the page and as Web Push
   notifications), food preferences and a food order, and exports.
-- **After the party**: posts stay editable (removing a large part asks for a reason), and new
+- **After the party**: posts stay freely editable, and new
   posts start private.
 - **Rounds**: the same site can hold one party after another. A new round opens in a fresh lobby
   with the same accounts; earlier rounds stay readable: their anthologies (`/archive/<n>`), their
@@ -64,6 +64,10 @@ end the party from the dashboard.
 
 `node server.js --make-admin <username>` makes an existing account a host in the state file. Run
 it while the server is stopped: a running server would overwrite the change.
+
+A host can take back the end of the latest party from the dashboard ("Resume the party…"): it runs
+again from then on, the time it was over counts as a pause (no hour is missed in it), and edits made
+meanwhile count like writing during a break.
 
 `node server.js --new-round` closes a party that has ended and opens the next round in the lobby
 (`lib/rounds.js`). Run it while the server is stopped, then start the server again. The closed

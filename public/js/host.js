@@ -663,7 +663,10 @@ export async function mountHost(root, { session }) {
       let line;
       if (p.phase === 'lobby') line = [h('b', null, Number.isFinite(p.plannedStart) ? `Starts ${dayClock(p.plannedStart)}` : 'Not started'), ` · ${plural(signUps(), 'writer')} signed up`, waitingList().length ? ` · ${waitingList().length} waiting for approval` : ''];
       // The next round opens from the server (lib/rounds.js): this round's anthology stays.
-      else if (p.phase === 'ended') line = [h('b', null, `Ended at ${clock(p.endedAt)}`), ' · for the next round, stop the server and run ', h('code', null, 'node server.js --new-round')];
+      else if (p.phase === 'ended') {
+        line = [h('b', null, `Ended at ${clock(p.endedAt)}`), ' · ', h('button', { class: 'btn-link', type: 'button', onClick: resumeParty }, 'Resume the party…'),
+          ' · for the next round, stop the server and run ', h('code', null, 'node server.js --new-round')];
+      }
       else if (br) {
         // "Dinner break until 19:00 · this hour's target 200" or "… · hours paused" (SPEC §19).
         const extra = modeOf(br) === 'pause' ? ' · hours paused' : sh ? ` · this hour’s target ${fmtInt(reducedTarget(sh))}` : ' · targets lowered for the break';
@@ -756,6 +759,20 @@ export async function mountHost(root, { session }) {
       confirmLabel: 'Start now',
     });
     if (ok) act('/api/admin/start', {}, 'The party has started.');
+  }
+  // Take back the end (lib/party.js resume): the party runs again from now.
+  async function resumeParty() {
+    const gap = Math.max(0, now() - (v.party.endedAt || now()));
+    const ok = await ask({
+      title: 'Resume the party?',
+      body: [
+        `It runs again from now, with the same writers, posts and hours. The time since it ended (${fmtDur(gap)}) counts as a pause: no hour is missed in it, and each writer’s hour picks up where it stopped.`,
+        'Edits writers made since the end count like writing during a break.',
+        'The anthology closes again until you end the party.',
+      ],
+      confirmLabel: 'Resume the party',
+    });
+    if (ok) act('/api/admin/resume', {}, 'The party is back on.');
   }
   async function endParty() {
     const started = v.writers.filter((w) => w.joinedAt).length;

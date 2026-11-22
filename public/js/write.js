@@ -1994,7 +1994,7 @@ export async function mountWriter(root, session) {
       if (!me.me.isAdmin) await api('/api/join', {}).catch(() => {});
       if (!openPosts().length) await newPost();
       else showPost(activeId);
-      toast('The party has started. Write well!');
+      toast(was === 'ended' ? 'The party is back on. Write well!' : 'The party has started. Write well!');
       offerBrainstorm();
     }
     renderMain();

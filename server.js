@@ -755,6 +755,7 @@ export function createApp({
   };
   const ADMIN = {
     '/api/admin/start': (c) => { party.start(c.userId); return {}; },
+    '/api/admin/resume': (c) => party.resume(c.userId), // take back the end of the latest party
     '/api/admin/end': (c) => { party.end(c.userId); return {}; },
     '/api/admin/party': (c) => {
       if (c.body.name !== undefined) party.setPartyName(c.userId, c.body.name);
