@@ -697,6 +697,8 @@ export async function mountHost(root, { session }) {
         { label: 'Export everything (JSON)', href: '/api/admin/export.json', menuOnly: true },
         // Published posts only (the server leaves out separate-identity posts until the end).
         { label: 'Export published posts (Markdown)', href: '/api/admin/export.md', menuOnly: true },
+        // The public site as plain HTML to host anywhere (lib/static-site.js): once a party has ended.
+        p.phase === 'ended' || p.rounds?.length ? { label: 'Export the public site (static website, .zip)', href: '/api/admin/static-site.zip', menuOnly: true } : null,
         perm === 'default' && p.phase !== 'ended' ? { label: 'Turn on notifications', onClick: enableNotifications } : null,
         // Help opens at its host section ("Running the party"), with this page's settings.
         help ? { label: 'Help', onClick: () => help.openHelp('host', { settings: v.settings, role: 'host', partyName: v.party.name }), last: true } : null,
@@ -839,7 +841,8 @@ export async function mountHost(root, { session }) {
         Number.isFinite(v.party.totals?.wordsToday) ? h('p', { class: 'h-sub h-end-note' }, `The projector’s “words today” is a different count: the words on the pages it shows, counted toward the targets or not. On every page, hidden ones too: ${plural(v.party.totals.wordsToday, 'word')}.`) : null,
         h('div', { class: 'h-end-actions' },
           h('a', { class: 'btn btn-primary', href: '/archive', target: '_blank', rel: 'noopener' }, 'Read the anthology'),
-          h('a', { class: 'btn', href: '/api/admin/export.md' }, 'Download published posts (Markdown)'),
+          h('a', { class: 'btn', href: '/api/admin/static-site.zip' }, 'Download the public site (static website)'),
+          h('a', { class: 'btn btn-quiet', href: '/api/admin/export.md' }, 'Download published posts (Markdown)'),
           h('a', { class: 'btn btn-quiet', href: '/api/admin/export.json' }, 'Download everything (JSON)')));
     });
   }

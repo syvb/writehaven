@@ -65,6 +65,12 @@ end the party from the dashboard.
 `node server.js --make-admin <username>` makes an existing account a host in the state file. Run
 it while the server is stopped: a running server would overwrite the change.
 
+Once a party has ended, a host can download the public site as a static website (Export → "Export the
+public site", `GET /api/admin/static-site.zip`, `lib/static-site.js`): every round's anthology, every
+published piece, the list of writers and their pages, as plain HTML with relative links, the site's
+stylesheets and fonts, and the images the pieces show. It needs no server or JavaScript, so it can
+live on any static host after the party; only what the public site shows goes in.
+
 A host can take back the end of the latest party from the dashboard ("Resume the party…"): it runs
 again from then on, the time it was over counts as a pause (no hour is missed in it), and edits made
 meanwhile count like writing during a break.

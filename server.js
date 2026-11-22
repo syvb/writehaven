@@ -16,6 +16,7 @@ import { loadState, createSaver, writeStateSync, cleanTempFiles } from './lib/st
 import { Journal } from './lib/journal.js';
 import { computePreviewChunked } from './lib/preview.js';
 import { createUploads } from './lib/uploads.js';
+import { buildStaticSite } from './lib/static-site.js';
 import { createFood } from './lib/food.js';
 import { createClientErrors } from './lib/client-errors.js';
 import { attachNotify } from './lib/notify.js';
@@ -906,6 +907,24 @@ export function createApp({
         }
         const stamp = party.localStamp(party.now()).slice(0, 16).replace(/[:T]/g, '-'); // on the party clock
         if (p === '/api/admin/export.json') return await streamExportJson(req, res, party.exportJson(c.userId), stamp);
+        // The public site as static HTML, to keep and serve without this server (lib/static-site.js).
+        if (p === '/api/admin/static-site.zip') {
+          party.requireAdmin(c.userId);
+          let built;
+          try {
+            built = await buildStaticSite(party, { uploadsDir: path.join(path.dirname(stateFile), 'uploads') });
+          } catch (e) {
+            if (e.status === 409) return sendJson(req, res, 409, { error: e.message, code: 'nothing-published' });
+            throw e;
+          }
+          if (res.headersSent) return undefined;
+          res.writeHead(200, { // already compressed: no gzip on top
+            'Content-Type': 'application/zip', 'Content-Length': built.zip.length, 'Cache-Control': 'no-store',
+            'Content-Disposition': `attachment; filename="writehaven-site-${stamp}.zip"`,
+          });
+          res.end(req.method === 'HEAD' ? undefined : built.zip);
+          return undefined;
+        }
         if (p === '/api/admin/export.md') {
           return sendBody(req, res, 200, party.exportMarkdown(c.userId), 'text/markdown; charset=utf-8', {
             'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="writehaven-archive-${stamp}.md"`,
