@@ -66,7 +66,7 @@ test('private is a per-post choice that no public view shows, at any time; hosts
   assert.deepEqual(party.archiveView().posts.map((p) => p.title).sort(), ['An open window', 'Lantern ledger']);
 });
 
-test('after the end a privacy change needs no reason: private takes a post out of the anthology, its page and the export at once; back to public returns it; closing stays locked', () => {
+test('after the end a privacy change needs no reason: private takes a post out of the anthology, its page and the export at once; back to public returns it; tabs close and reopen', () => {
   const { party, clock, host } = setup();
   const w = addUser(party, 'wren');
   party.join(w.id);
@@ -94,9 +94,10 @@ test('after the end a privacy change needs no reason: private takes a post out o
   for (const id of published) assert.throws(() => party.publicPost(id), (e) => e.status === 404, 'its page is gone');
   assert.doesNotMatch(party.exportMarkdown(host.id), /regret/i);
   assert.ok(party.meView(w.id).posts.filter((p) => p.privacy === 'private').every((p) => p.publicId === null));
-  // Closing never changes after the end. A title can change with a privacy change.
-  const ended = (e) => e.status === 409 && e.extra?.code === 'ended';
-  assert.throws(() => party.updatePost(w.id, { id: keep.id, closed: true }), ended, 'closing');
+  // Closing a tab after the end changes nothing public: the post stays in the anthology.
+  assert.equal(party.updatePost(w.id, { id: keep.id, closed: true }).closed, true);
+  assert.deepEqual(titles(), ['Kept']);
+  assert.equal(party.updatePost(w.id, { id: keep.id, closed: false }).closed, false);
   assert.equal(party.updatePost(w.id, { id: live.id, privacy: 'private' }).privacy, 'private', 'asking again is harmless');
   // The way back: a private post returns to the anthology (usual rules), and hosts see each change.
   assert.equal(party.updatePost(w.id, { id: sep.id, privacy: 'named', title: 'Separate regret, signed' }).privacy, 'named');

@@ -118,8 +118,15 @@ test('after the party: changes save with no reason, in a quiet session; they nev
   party.applyOps(w.id, { ...batch(p, 'body', [{ at: end - MIN, pos: 0, del: 0, ins: 'offline ' }]), sentAt: end - MIN + 500 });
   assert.ok(p.body.startsWith('offline So: '));
   assert.equal(scoreOf(party, w.id), score);
-  // Closing a post still isn't a change after the end.
-  assert.throws(() => party.updatePost(w.id, { id: p.id, closed: true }), (e) => e.status === 409 && e.extra.code === 'ended');
+  // Closing a post's tab and reopening it work after the end too, and are no edit after the party:
+  // no session, no note, no history, nothing scored.
+  const was = JSON.stringify([p.after, party.publicPost(p.publicId).edited, party.state.log.length]);
+  assert.equal(party.updatePost(w.id, { id: p.id, closed: true }).closed, true);
+  assert.equal(party.meView(w.id).posts.find((x) => x.id === p.id).closed, true);
+  assert.equal(party.updatePost(w.id, { id: p.id, closed: false }).closed, false);
+  assert.equal(JSON.stringify([p.after, party.publicPost(p.publicId).edited, party.state.log.length]), was);
+  assert.equal(scoreOf(party, w.id), score);
+  assert.throws(() => party.updatePost(w.id, { id: p.id, closed: 'yes' }), (e) => e.status === 400);
 });
 
 test('after the party, a change that removes 50+ words goes in with no reason; hosts see it in the post’s history; a reason an older page sends is kept for them, never public', () => {

@@ -490,7 +490,7 @@ export async function mountWriter(root, session) {
         h('span', { class: `w-dot dot-${p.unlisted && p.privacy !== 'private' ? 'hidden' : p.privacy}`, 'aria-hidden': 'true' }), // private: the padlock, hidden or not
         h('span', { class: 'w-tab-title' }, p.title || 'Untitled')),
         more,
-        writable() ? h('button', {
+        canWrite() ? h('button', { // after the end too: tabs open and close freely
           class: 'w-tab-close', type: 'button', 'aria-label': `Close ${p.title || 'Untitled'}`,
           onClick: (e) => { e.stopPropagation(); closePost(p); },
         }, '×') : null);
@@ -598,7 +598,7 @@ export async function mountWriter(root, session) {
       { label: 'Move right', disabled: i === open.length - 1, onClick: () => moveTabTo(id, i + 1, { focus: true }) },
       '-',
       { label: starred ? 'Unstar' : 'Star on my page', hint: !starred && p.privacy !== 'named' ? 'shows once signed' : null, onClick: () => starPost(p, !starred) },
-      writable() ? { label: 'Close post', onClick: () => closePost(p) } : null,
+      canWrite() ? { label: 'Close post', onClick: () => closePost(p) } : null,
     ], { className: 'menu-tab', onClose: (chose) => { if (!chose && anchor.isConnected) anchor.focus({ preventScroll: true }); } });
   }
   // SPEC §28b: a star puts a post first on your personal page. Any post can have one (it's
@@ -805,7 +805,9 @@ export async function mountWriter(root, session) {
       p.closed = true;
       if (activeId === p.id) showPost(openPosts()[0]?.id);
       else renderTabs();
-      toast(p.privacy === 'private' ? 'Closed. It still counts and stays private; reopen it from your menu.' : 'Closed. It still counts and publishes; reopen it from your menu.');
+      toast(me.party.phase === 'ended'
+        ? (p.privacy === 'private' ? 'Closed. It stays private; reopen it from your menu.' : 'Closed. It stays in the anthology; reopen it from your menu.')
+        : (p.privacy === 'private' ? 'Closed. It still counts and stays private; reopen it from your menu.' : 'Closed. It still counts and publishes; reopen it from your menu.'));
     } catch (e) {
       toast(e.message, { kind: 'error' });
     }
@@ -1800,9 +1802,7 @@ export async function mountWriter(root, session) {
       installMod && !installMod.isStandalone?.() ? { label: 'Add to Home Screen', onClick: () => installMod.openInstallHelp({ returnFocus: meBtn }) } : null,
       closed.length ? '-' : null,
       closed.length ? { heading: 'Closed posts' } : null,
-      ...closed.map((c) => (me.party.phase === 'ended' && c.privacy !== 'private'
-        ? { label: c.title || 'Untitled', hint: 'Make private…', onClick: () => privacyAfterParty(c, 'private') } // after the end: with a reason
-        : { label: c.title || 'Untitled', hint: 'Reopen', onClick: () => reopenPost(c) })),
+      ...closed.map((c) => ({ label: c.title || 'Untitled', hint: 'Reopen', onClick: () => reopenPost(c) })), // after the end too
       passOffer() ? '-' : null,
       passOffer() ? { heading: 'This hour' } : null,
       passOffer() ? { label: 'Take this hour off…', hint: passOffer() === 1 ? '1 free hour left' : `${passOffer()} free hours left`, onClick: () => takePass() } : null,
