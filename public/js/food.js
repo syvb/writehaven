@@ -578,8 +578,6 @@ export function renderFoodForm(container, { compact = false, statusIn = null, ti
     }
     const did = nextId('fd-f');
     part.append(question('Drinks for the order', textField({ id: did, get: () => o.drinks, set: (v) => { o.drinks = v; }, placeholder: 'e.g. sparkling water, a ginger beer' }), { forId: did }));
-    const pid = nextId('fd-f');
-    part.append(question('Budget or payment note', textField({ id: pid, get: () => o.payment, set: (v) => { o.payment = v; }, placeholder: 'e.g. happy to chip in £15' }), { forId: pid, help: 'Optional.' }));
     return part;
   }
 
@@ -1245,7 +1243,7 @@ function confirmReset(answered) {
       title: 'Reset the food order answers?',
       className: 'modal-confirm fd-reset-modal',
       body: h('div', { class: 'modal-body' },
-        h('p', null, h('b', null, 'This clears, for everyone: '), 'whether they’re eating with us, how hungry, their picks, their order, drinks for the order and payment notes', answered ? ` (${answered === 1 ? '1 person has' : `${answered} people have`} order answers now)` : '', '.'),
+        h('p', null, h('b', null, 'This clears, for everyone: '), 'whether they’re eating with us, how hungry, their picks, their order and drinks for the order', answered ? ` (${answered === 1 ? '1 person has' : `${answered} people have`} order answers now)` : '', '.'),
         h('p', null, h('b', null, 'It keeps: '), 'diet, allergies (and “none that I know of”), dislikes, favourites, spice, favourite drinks, anything else they told you, and sharing. Writers see those already filled in. Your order options and deadline stay too.'),
         h('p', null, 'Everyone’s answers as they are now are saved in the food history first, and a CSV of them is downloading.'),
         h('label', { class: 'fd-reset-label', id: 'fd-reset-help' }, h('span', null, 'Type ', h('b', null, 'RESET'), ' to confirm'), input)),

@@ -334,7 +334,7 @@ test('food: a writer whose answers look like formulas stays harmless in the CSV'
   const { base, close, host, mk } = await setup();
   t.after(close);
   const eve = await mk('eve', '=HYPERLINK("http://x.example","hi")'); // names are cut at 40
-  await put(base, eve.c, '/api/me/food', { avoid: '=1+1', love: '+cmd', drinks: '-2', notes: '@SUM(A1)', allergies: [{ item: '=peanuts', note: '\t=x' }], order: { wish: '=WEBSERVICE("http://x")', drinks: '@x', payment: '+44 7700 900000' } });
+  await put(base, eve.c, '/api/me/food', { avoid: '=1+1', love: '+44 7700 900000', drinks: '-2', notes: '@SUM(A1)', allergies: [{ item: '=peanuts', note: '\t=x' }], order: { wish: '=WEBSERVICE("http://x")', drinks: '@x' } });
   const csv = await (await host.get('/api/host/food.csv', { raw: true })).text();
   for (const cell of csv.match(/"(?:[^"]|"")*"/g)) assert.ok(!/^"[=+\-@\t\r]/.test(cell), cell);
   assert.ok(csv.includes(`"'=HYPERLINK(""http://x.example"",""hi"")"`));
@@ -416,7 +416,7 @@ test('food: the history is in the host’s all-data export and the history CSV, 
   await host.post('/api/admin/start', {});
   const ana = await mk('ana', 'Ana Ruiz');
   const bob = await mk('bob', 'Bob Stone');
-  await put(base, ana.c, '/api/me/food', { love: 'HISTLOVEZ', order: { eating: 'yes', picks: [thai], lines: { [thai]: 'HISTORDERZ green curry' }, payment: 'HISTPAYZ' } });
+  await put(base, ana.c, '/api/me/food', { love: 'HISTLOVEZ', order: { eating: 'yes', picks: [thai], lines: { [thai]: 'HISTORDERZ green curry' } } });
   await ana.c.post('/api/join', {});
   const post = (await ana.c.post('/api/post/new', { title: 'A page' })).json.post;
   await ana.c.post('/api/ops', { postId: post.id, pane: 'body', baseVersion: 0, sentAt: Date.now(), ops: [{ at: Date.now(), pos: 0, del: 0, ins: 'Words on the live page.' }] });
@@ -435,7 +435,6 @@ test('food: the history is in the host’s all-data export and the history CSV, 
   assert.ok(lines[0].startsWith('"Reset at","Name"'), 'a reset time first, then the usual columns');
   const anaRow = lines.find((l) => l.includes('"Ana Ruiz"'));
   assert.ok(anaRow.includes('"Thai — Busaba: HISTORDERZ green curry"'), 'with the place’s name as it was');
-  assert.ok(anaRow.includes('"HISTPAYZ"'));
   for (const who of [client(base), ana.c, bob.c]) assert.equal((await who.get('/api/host/food-history.csv')).status, 404, 'hosts only');
   // Never public, never another writer's: no history text anywhere.
   const anon = client(base);
