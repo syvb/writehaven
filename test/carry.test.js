@@ -154,3 +154,64 @@ test('party: a missed hour with carried words says so in the log and the alert',
   const text = party.hostView(host.id).alerts.find((a) => a.id === al.id).text;
   assert.match(text, new RegExp(`missed hour 2 \\(${al.countedWords} of 50, ${al.carriedWords} carried over\\)`));
 });
+
+test('a writer’s own carryover limit replaces the setting for them only', () => {
+  const own = prog([1000, 300, 0], { user: { carryOverride: 600 } });
+  assert.deepEqual(pick(own, 'carriedIn'), [0, 600, 500]); // 1000 - 400; then 600 + 300 - 400
+  assert.deepEqual(pick(own, 'status'), ['met', 'met', 'current']);
+  // 0 turns it off for them; null (or nothing) is the setting.
+  assert.deepEqual(pick(prog([1000, 300, 0], { user: { carryOverride: 0 } }), 'carriedIn'), [0, 0, 0]);
+  assert.deepEqual(pick(prog([1000, 300, 0], { user: { carryOverride: null } }), 'carriedIn'), [0, 200, 100]);
+  // A limit for one writer works even with the setting off.
+  assert.deepEqual(pick(prog([1000, 0], { S: { carryOverMax: 0 }, user: { carryOverride: 600 } }), 'carriedIn'), [0, 600]);
+});
+
+test('party: the host sets one writer’s carryover limit; previews, views, log and validation', async () => {
+  const { party, clock } = makeParty({ settings: { hourLengthMin: 10, targetPerHour: 50, carryOverMax: 10 } });
+  const host = addUser(party, 'host');
+  party.start(host.id);
+  const mk = (name, from) => {
+    const w = addUser(party, name);
+    party.join(w.id);
+    const p = party.newPost(w.id, {});
+    typeInto(party, clock, w, p, realProse(80, from), { cps: 4 }); // ~80 words: ~30 over the target
+    return { w, p };
+  };
+  const ana = mk('ana', 0);
+  const bob = mk('bob', 80);
+  // Hours are personal here: each writer's hour 2 starts 10 minutes after they joined.
+  clock.set(ana.w.joinedAt + 10 * MIN + 10 * SEC);
+  typeInto(party, clock, ana.w, ana.p, ` ${realProse(30, 170)}`, { cps: 4 }); // ~30 in hour 2
+  clock.set(Math.max(clock.now(), bob.w.joinedAt + 10 * MIN + 10 * SEC));
+  typeInto(party, clock, bob.w, bob.p, ` ${realProse(30, 210)}`, { cps: 4 });
+  clock.set(bob.w.joinedAt + 22 * MIN); // both hour 2s judged, both hour 3s running
+  party.tick();
+  // With the setting (10), 30 + 10 < 50: both miss hour 2 and are out.
+  assert.deepEqual(statuses(party, ana.w.id), ['met', 'missed', 'current']);
+  assert.equal(ana.w.out, true);
+  assert.equal(bob.w.out, true);
+  // The preview says what Ana's own limit of 600 would change, and only for her.
+  const pv = await party.previewSettings(host.id, { writers: [{ id: ana.w.id, carryOverride: 600 }] });
+  assert.deepEqual(pv.changes.map((c) => [c.writerId, c.hour, c.from, c.to]), [[ana.w.id, 2, 'missed', 'met']]);
+  assert.throws(() => party.adminWriter(host.id, { id: ana.w.id, carryOverride: 'lots' }), /whole number/);
+  assert.throws(() => party.adminWriter(host.id, { id: ana.w.id, carryOverride: -1 }), /whole number/);
+  assert.throws(() => party.adminWriter(ana.w.id, { id: ana.w.id, carryOverride: 600 }));
+  party.adminWriter(host.id, { id: ana.w.id, carryOverride: 600 });
+  party.tick();
+  assert.equal(ana.w.carryOverride, 600);
+  assert.deepEqual(statuses(party, ana.w.id), ['met', 'met', 'current']);
+  assert.equal(ana.w.out, false, 'back in: the hour that put her out is met now');
+  assert.equal(bob.w.out, true, 'Bob keeps the setting');
+  assert.deepEqual(statuses(party, bob.w.id), ['met', 'missed', 'current']);
+  // Ana's views and the host's say so; the log too.
+  assert.equal(party.meView(ana.w.id).settings.carryOverMax, 600);
+  assert.equal(party.meView(bob.w.id).settings.carryOverMax, 10);
+  const rows = party.hostView(host.id).writers;
+  assert.equal(rows.find((x) => x.id === ana.w.id).carryOverride, 600);
+  assert.equal(rows.find((x) => x.id === bob.w.id).carryOverride, null);
+  assert.ok(party.state.log.some((l) => l.type === 'carry' && l.userId === ana.w.id && /600/.test(l.text)));
+  // Empty: back to the setting.
+  party.adminWriter(host.id, { id: ana.w.id, carryOverride: '' });
+  assert.equal(ana.w.carryOverride, null);
+  assert.equal(party.meView(ana.w.id).settings.carryOverMax, 10);
+});

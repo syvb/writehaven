@@ -1523,6 +1523,7 @@ export async function mountHost(root, { session }) {
       ck: phase() === 'ended' ? null : checkK(w),
       strip: stripModel(w),
       target: [w.targetOverride ?? null, v.settings.targetPerHour],
+      carry: [w.carryOverride ?? null, v.settings.carryOverMax ?? null],
       flags,
       words: Math.round(w.totals?.credit || 0),
       met: w.progress ? [w.progress.met, w.progress.missed, w.progress.free, w.progress.review] : null,
@@ -1679,6 +1680,41 @@ export async function mountHost(root, { session }) {
       }
     }
     act('/api/admin/writer', { id: w.id, targetOverride: want }, want === null ? `${first} is back on the default target.` : `${first}’s target is ${fmtInt(want)}.`);
+  }
+  // A per-writer carryforward limit (lib/progress.js carryCap): it moves words between all of
+  // their hours, so while the party runs, finished hours it would change are shown first.
+  async function changeCarry(w, raw, revert) {
+    const def = v.settings.carryOverMax ?? 0;
+    const s = String(raw).trim();
+    const next = s === '' ? null : Number(s);
+    if (next !== null && (!Number.isInteger(next) || next < 0)) {
+      toast('A carryover limit is a whole number of words.', { kind: 'error' });
+      revert();
+      return;
+    }
+    const want = next === def && (w.carryOverride ?? null) === null ? null : next;
+    if (want === (w.carryOverride ?? null)) {
+      revert();
+      return;
+    }
+    const first = firstName(w.name);
+    if (phase() === 'running' && w.joinedAt) {
+      let res;
+      try {
+        res = await api('/api/host/settings/preview', { writers: [{ id: w.id, carryOverride: want }] });
+      } catch (e) {
+        toast(e.message, { kind: 'error' });
+        revert();
+        return;
+      }
+      const lines = [`Words over the target that carry to the next hour, at most: ${fmtInt(w.carryOverride ?? def)} → ${fmtInt(want ?? def)}${want === null ? ' (the default)' : ''}, for all of ${first}’s hours.`];
+      const ok = await previewDialog({ title: `Change ${w.name}’s carryover limit to ${fmtInt(want ?? def)}?`, lines, changes: res.changes, confirmLabel: 'Change the limit and re-judge', plainLabel: 'Change the limit' });
+      if (!ok) {
+        revert();
+        return;
+      }
+    }
+    act('/api/admin/writer', { id: w.id, carryOverride: want }, want === null ? `${first} is back on the default carryover limit.` : `${first} can carry up to ${fmtInt(want)} words to the next hour.`);
   }
 
   // What re-scoring completed hours does, said first: which completed hours change and who goes
@@ -1901,6 +1937,18 @@ export async function mountHost(root, { session }) {
       h('p', { class: 'h-drawer-target' }, tIn, ` words an hour ${own === null ? '(the default)' : `(their own; the default is ${fmtInt(def)})`}`),
       cur && !cur.free && cur.target !== (own ?? def) ? h('p', { class: 'h-sub' }, `This hour’s target is ${fmtInt(cur.target)}${cur.prorated ? ' (a shorter first hour)' : cur.extended ? ' (a longer first hour)' : (cur.reducedBy || []).length ? ' (lowered for a break)' : ''}.`) : null,
       h('p', { class: 'h-sub' }, own === null ? 'Change it for this writer only (you’ll see what it changes first). Empty it later to go back to the default.' : 'Empty the box to go back to the default.')));
+
+    // Carryover (lib/progress.js carryCap): shown once the server reports the setting.
+    if (v.settings.carryOverMax !== undefined) {
+      const cdef = v.settings.carryOverMax ?? 0;
+      const cown = w.carryOverride ?? null;
+      const cIn = h('input', { class: 'h-target-in', type: 'text', inputmode: 'numeric', value: String(cown ?? cdef), size: 5, 'aria-label': `Carryover limit for ${w.name}, words` });
+      cIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') cIn.blur(); });
+      cIn.addEventListener('change', () => changeCarry(w, cIn.value, () => { cIn.value = String(cown ?? cdef); }));
+      out.push(h('section', { class: 'h-dsec' }, h('h3', null, 'Carryover'),
+        h('p', { class: 'h-drawer-target' }, cIn, ` words over the target can carry to the next hour ${cown === null ? '(the default)' : `(their own; the default is ${fmtInt(cdef)})`}`),
+        h('p', { class: 'h-sub' }, cown === null ? 'Change it for this writer only (you’ll see what it changes first). Empty it later to go back to the default.' : 'Empty the box to go back to the default.')));
+    }
 
     // Actions, each saying what it does; "Mark as out" last
     const acts = [];
