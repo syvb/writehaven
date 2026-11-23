@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeParty, addUser, typeInto, startApp, client, sleep } from './helpers.js';
-import { realProse, MIN, SEC } from './sim.js';
+import { realProse, MIN, SEC, HOUR } from './sim.js';
 import { Party } from '../lib/party.js';
 
 function setup() {
@@ -84,6 +84,56 @@ test('approval: decline with a note; a new message asks again; approve all; decl
   assert.equal(lv.party.totals.wordsToday, 0);
   assert.equal(lv.counters.posts, 0);
   assert.throws(() => party.decline(host.id, { id: host.id }), /always approved/);
+});
+
+test('approval: a waiting account can’t grow the state: its messages rewrite one alert, 10 an hour, and its lines can’t fill the host log', () => {
+  const { party, clock, host } = setup();
+  const mal = addUser(party, 'mal', 'Mal');
+  // A message every 10 seconds for two hours.
+  let sent = 0;
+  for (let i = 0; i < 720; i++) {
+    clock.advance(10 * SEC);
+    try {
+      party.setApprovalMessage(mal.id, `message ${i}`);
+      sent++;
+    } catch (e) {
+      assert.ok(e.status === 429 && e.message === 'too_fast' && e.extra.retryAfterMs > 0, String(e));
+    }
+  }
+  assert.equal(sent, 20, '10 an hour');
+  assert.equal(party.state.alerts.length, 1, 'one alert, rewritten');
+  const hv = party.hostView(host.id);
+  assert.equal(hv.pending[0].message, 'message 369', 'the host has the latest message');
+  assert.deepEqual(hv.alerts.map((a) => [a.userId, a.closed, a.message]), [[mal.id, false, 'message 369']]);
+  const own = () => party.state.log.filter((l) => l.userId === mal.id && !l.by);
+  assert.deepEqual(own().map((l) => l.type), ['register', 'approval-message'], 'the log has the first message, not each edit');
+  // Declined, a new message asks again: that is a new request, with its own alert and log line.
+  party.decline(host.id, { id: mal.id });
+  clock.advance(HOUR);
+  party.setApprovalMessage(mal.id, 'Please?');
+  clock.advance(10 * SEC);
+  party.setApprovalMessage(mal.id, 'Please!');
+  assert.deepEqual(party.hostView(host.id).alerts.map((a) => [a.closed, a.message]), [[true, 'message 369'], [false, 'Please!']]);
+  assert.deepEqual(own().map((l) => l.text), ['registered, waiting for approval', 'sent the host a message', 'asked again for approval']);
+  // Whatever else it does while it waits, only its newest 20 lines stay in the log...
+  for (let i = 0; i < 100; i++) party.setPublicProfile(mal.id, i % 2 === 0);
+  assert.equal(own().length, 20);
+  assert.equal(own().at(-1).text, 'left the public list of writers', 'the newest are the ones kept');
+  assert.ok(party.state.log.some((l) => l.type === 'start') && party.state.log.some((l) => l.type === 'decline'), 'the party’s own lines stay');
+  // ...and once a host has approved it, every line stays, like any writer's.
+  party.approve(host.id, { id: mal.id });
+  for (let i = 0; i < 30; i++) party.setPublicProfile(mal.id, i % 2 === 0);
+  assert.equal(own().length, 50);
+  // After the end alerts are kept closed, and messages still rewrite the one alert.
+  const late = addUser(party, 'late', 'Late');
+  party.end(host.id);
+  const before = party.state.alerts.length;
+  for (const m of ['one', 'two', 'three']) {
+    clock.advance(10 * SEC);
+    party.setApprovalMessage(late.id, m);
+  }
+  assert.equal(party.state.alerts.length, before);
+  assert.deepEqual(party.hostView(host.id).alerts.filter((a) => a.userId === late.id).map((a) => [a.closed, a.message]), [[true, 'three']]);
 });
 
 test('approval: accounts from before, admins, and everyone while approval is off count as approved', () => {

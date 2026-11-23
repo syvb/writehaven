@@ -447,8 +447,10 @@ function mountApproval(root, session, me, onApproved) {
         sending = false;
         send.disabled = false;
         if (ex.status === 429) {
+          // Messages are 10 seconds apart, and at most 10 an hour: the second wait is a long one.
           const s = Math.max(1, Math.ceil((ex.data?.retryAfterMs || 10000) / 1000));
-          err.textContent = `One moment: you can change your message again in ${s} second${s === 1 ? '' : 's'}.`;
+          err.textContent = s <= 90 ? `One moment: you can change your message again in ${s} second${s === 1 ? '' : 's'}.`
+            : `That’s a lot of messages in an hour: you can send another in ${Math.ceil(s / 60)} minutes. The host still has your last one.`;
         } else if (ex.status === 404) err.textContent = 'Messages to the host aren’t switched on here. Just wait; the host can still approve you.';
         else if (ex.network) err.textContent = 'You seem to be offline. Your message is still here; send it when you’re back.';
         else err.textContent = ex.message || 'Couldn’t send that. Try again.';
