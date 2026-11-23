@@ -138,3 +138,60 @@ test('the static site waits for a party to end; over HTTP it is for hosts only',
   const names = unzip(Buffer.from(await res.arrayBuffer())).map((f) => f.name);
   assert.ok(names.includes('index.html') && names.includes('writers/index.html'));
 });
+
+test('the front-page note: Markdown on the static site’s front page only, escaped; hosts only; kept for the next download and the next round', async (t) => {
+  const x = party();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-static-'));
+  fs.writeFileSync(path.join(dir, x.IMG), Buffer.from('RIFF....WEBPVP8 '));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // Only hosts; text only; not too long; empty clears.
+  assert.throws(() => x.party.setStaticNote(x.ana.id, 'hi'), (e) => e.status === 404);
+  assert.throws(() => x.party.setStaticNote(x.host.id, { a: 1 }), (e) => e.status === 400);
+  assert.throws(() => x.party.setStaticNote(x.host.id, 'x'.repeat(20_001)), /at most/);
+  const note = '## Thank you\r\n\r\nThe party is _over_, but **the writing stays**. Find us at [the club](https://example.org/club).[^1]\n\n<script>alert(1)</script>\n\n[^1]: Every Sunday.';
+  assert.equal(x.party.setStaticNote(x.host.id, note).note, note.replace(/\r\n/g, '\n'));
+  assert.equal(x.party.hostView(x.host.id).staticNote, note.replace(/\r\n/g, '\n'));
+  assert.ok(x.party.state.log.some((l) => l.type === 'static-note' && l.by === x.host.id));
+  const files = new Map(unzip((await buildStaticSite(x.party, { uploadsDir: dir })).zip).map((f) => [f.name, f.data.toString('utf8')]));
+  const index = files.get('index.html');
+  assert.match(index, /<section class="a-note prose" aria-label="A note from the hosts">/);
+  assert.match(index, /<h3>Thank you<\/h3>|<h2>Thank you<\/h2>/);
+  assert.match(index, /<em>over<\/em>/);
+  assert.match(index, /<strong>the writing stays<\/strong>/);
+  assert.match(index, /<a href="https:\/\/example\.org\/club"[^>]*>the club<\/a>/);
+  assert.match(index, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(index, /<script/);
+  assert.match(index, /id="nfn-1"/, 'its footnotes, apart from the pieces’');
+  assert.ok(index.indexOf('a-note') < index.indexOf('a-contents'), 'above the contents');
+  assert.doesNotMatch(files.get('archive/1/index.html'), /Thank you/, 'the front page only');
+  // An image only the note shows comes along.
+  x.party.setStaticNote(x.host.id, `![Us](/u/${x.IMG})`);
+  const named = new Set(unzip((await buildStaticSite(x.party, { uploadsDir: dir })).zip).map((f) => f.name));
+  assert.ok(named.has(`u/${x.IMG}`));
+  // Cleared: no note.
+  assert.deepEqual(x.party.setStaticNote(x.host.id, '  '), { note: '' });
+  const plain = unzip((await buildStaticSite(x.party, { uploadsDir: dir })).zip).find((f) => f.name === 'index.html').data.toString('utf8');
+  assert.doesNotMatch(plain, /a-note/);
+  // A new round keeps it (it's the site's, for every round).
+  const { nextRoundState } = await import('../lib/rounds.js');
+  x.party.setStaticNote(x.host.id, 'Kept.');
+  assert.equal(nextRoundState(structuredClone(x.party.state), { at: Date.now() }).party.staticNote, 'Kept.');
+});
+
+test('the front-page note over HTTP: hosts set it, then the download has it', async (t) => {
+  const { base, close } = await startApp();
+  t.after(close);
+  const h = client(base);
+  await h.post('/api/register', { username: 'host', password: 'longpassword', name: 'Host' });
+  await h.post('/api/admin/start', {});
+  const w = client(base);
+  await w.post('/api/register', { username: 'wren', password: 'longpassword', name: 'Wren' });
+  await h.post('/api/admin/end', {});
+  assert.equal((await w.post('/api/admin/static-site/note', { note: 'mine' })).status, 404);
+  const r = await h.post('/api/admin/static-site/note', { note: 'See you *next year*.' });
+  assert.equal(r.json.note, 'See you *next year*.');
+  assert.equal((await h.get('/api/admin/state')).json.staticNote, 'See you *next year*.');
+  const res = await h.get('/api/admin/static-site.zip', { raw: true });
+  const index = unzip(Buffer.from(await res.arrayBuffer())).find((f) => f.name === 'index.html').data.toString('utf8');
+  assert.match(index, /See you <em>next year<\/em>\./);
+});

@@ -875,6 +875,10 @@ body[data-screen='public'] { background-color: var(--paper); }
 .a-head { margin-bottom: clamp(2.5rem, 7vw, 4.5rem); }
 .a-title { margin: 0; font: italic 400 clamp(3rem, 9vw, 6.4rem)/0.95 var(--serif); letter-spacing: -0.035em; font-variation-settings: 'opsz' 72; }
 .a-lede { max-width: 36rem; margin: 1.4rem 0 0; font: 400 clamp(1.15rem, 2.2vw, 1.4rem)/1.5 var(--serif); color: var(--ink-2); text-wrap: pretty; font-variant-numeric: lining-nums; }
+/* The hosts' note on the static site's front page (lib/static-site.js). */
+.a-note { margin: 0 0 clamp(2.5rem, 7vw, 4rem); padding: 0.1rem 0 0.1rem 1.25rem; border-left: 2px solid var(--rule); font-size: 1.12rem; line-height: 1.6; text-wrap: pretty; }
+.a-note > :last-child { margin-bottom: 0; }
+.a-note .footnotes { margin-top: 1.2rem; font-size: 0.88em; }
 .a-contents-h { margin: 0 0 0.8rem; font: 600 0.72rem var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
 .a-toc { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
 .a-entry { border-bottom: 1px solid var(--rule-2); }

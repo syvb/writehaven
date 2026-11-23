@@ -698,7 +698,7 @@ export async function mountHost(root, { session }) {
         // Published posts only (the server leaves out separate-identity posts until the end).
         { label: 'Export published posts (Markdown)', href: '/api/admin/export.md', menuOnly: true },
         // The public site as plain HTML to host anywhere (lib/static-site.js): once a party has ended.
-        p.phase === 'ended' || p.rounds?.length ? { label: 'Export the public site (static website, .zip)', href: '/api/admin/static-site.zip', menuOnly: true } : null,
+        p.phase === 'ended' || p.rounds?.length ? { label: 'Export the public site (static website, .zip)…', onClick: () => exportStaticSite(), menuOnly: true } : null,
         perm === 'default' && p.phase !== 'ended' ? { label: 'Turn on notifications', onClick: enableNotifications } : null,
         // Help opens at its host section ("Running the party"), with this page's settings.
         help ? { label: 'Help', onClick: () => help.openHelp('host', { settings: v.settings, role: 'host', partyName: v.party.name }), last: true } : null,
@@ -710,7 +710,7 @@ export async function mountHost(root, { session }) {
         ? h('a', { class: 'btn btn-quiet', href: l.href, ...(l.blank ? { target: '_blank', rel: 'noopener' } : {}) }, l.label)
         : h('button', { class: 'btn btn-quiet', type: 'button', onClick: l.onClick }, l.label));
       const exportBtn = h('button', { class: 'btn btn-quiet', type: 'button', 'aria-haspopup': 'menu' }, 'Export');
-      exportBtn.addEventListener('click', () => menu(exportBtn, links.filter((l) => l.menuOnly).map((l) => ({ label: l.label, onClick: () => { location.href = l.href; } })), { align: 'right' }));
+      exportBtn.addEventListener('click', () => menu(exportBtn, links.filter((l) => l.menuOnly).map((l) => ({ label: l.label, onClick: l.onClick || (() => { location.href = l.href; }) })), { align: 'right' }));
       const more = h('button', { class: 'btn btn-quiet h-more', type: 'button', 'aria-haspopup': 'menu' }, 'More');
       more.addEventListener('click', () => menu(more, links.map((l) => ({
         label: l.label,
@@ -761,6 +761,47 @@ export async function mountHost(root, { session }) {
       confirmLabel: 'Start now',
     });
     if (ok) act('/api/admin/start', {}, 'The party has started.');
+  }
+  // The public site as a static website (lib/static-site.js), with an optional note for its front
+  // page (Markdown, saved for the next download): the note is saved first, then the ZIP downloads.
+  function exportStaticSite() {
+    const was = v.staticNote || '';
+    const input = h('textarea', { class: 'h-note h-static-note', rows: 7, maxlength: 20000, id: 'h-static-note', 'aria-describedby': 'h-static-note-hint', placeholder: 'For example: Thanks for coming! The next party is on…' });
+    input.value = was;
+    const err = h('p', { class: 'w-reason-err', role: 'alert' });
+    modal({
+      title: 'Download the public site',
+      className: 'h-static-modal',
+      body: h('div', { class: 'modal-body' },
+        h('p', null, 'Every round’s anthology, every published piece and the writers’ pages, as plain HTML to put on any static host. Only what the public site shows goes in.'),
+        h('label', { class: 'h-note-label', for: 'h-static-note' }, h('span', null, 'A note for the front page (optional)')),
+        input,
+        h('p', { class: 'h-sub', id: 'h-static-note-hint' }, 'Shown above the contents on the site’s front page. Markdown works: **bold**, _italics_, [links](https://example.org), headings, lists. It’s kept for your next download.'),
+        err),
+      actions: [
+        { label: 'Cancel', quiet: true },
+        {
+          label: 'Download', primary: true,
+          onClick: (close) => {
+            const note = input.value;
+            (async () => {
+              try {
+                if (note.trim() !== was.trim()) {
+                  const r = await api('/api/admin/static-site/note', { note });
+                  v.staticNote = r.note;
+                }
+                close();
+                location.href = '/api/admin/static-site.zip';
+              } catch (e) {
+                err.textContent = e.network ? 'You seem to be offline. Try again when you’re back.' : e.message;
+              }
+            })();
+            return false; // closes once the note is saved
+          },
+        },
+      ],
+    });
+    setTimeout(() => input.focus(), 0);
   }
   // Take back the end (lib/party.js resume): the party runs again from now.
   async function resumeParty() {
@@ -841,7 +882,7 @@ export async function mountHost(root, { session }) {
         Number.isFinite(v.party.totals?.wordsToday) ? h('p', { class: 'h-sub h-end-note' }, `The projector’s “words today” is a different count: the words on the pages it shows, counted toward the targets or not. On every page, hidden ones too: ${plural(v.party.totals.wordsToday, 'word')}.`) : null,
         h('div', { class: 'h-end-actions' },
           h('a', { class: 'btn btn-primary', href: '/archive', target: '_blank', rel: 'noopener' }, 'Read the anthology'),
-          h('a', { class: 'btn', href: '/api/admin/static-site.zip' }, 'Download the public site (static website)'),
+          h('button', { class: 'btn', type: 'button', onClick: () => exportStaticSite() }, 'Download the public site (static website)…'),
           h('a', { class: 'btn btn-quiet', href: '/api/admin/export.md' }, 'Download published posts (Markdown)'),
           h('a', { class: 'btn btn-quiet', href: '/api/admin/export.json' }, 'Download everything (JSON)')));
     });
