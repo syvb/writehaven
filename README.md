@@ -145,6 +145,41 @@ the server stopped. Here the server runs as the user `writehaven` in `/srv/write
 The server loads the certificate within a minute. certbot's own timer renews it before it
 expires, and the server switches to the new one by itself, also within a minute.
 
+### As a service, with backups
+
+`deploy/` has what a server needs to run it unattended, as examples to adapt (paths, domain, ports):
+
+- `deploy/writehaven.service`: a systemd unit for the setup above (the app in `/srv/writehaven`, its
+  data in `/srv/writehaven/data` owned by the user `writehaven`, HTTPS on 443 and certbot's
+  challenges on 80), able to write nothing but its data directory. It restarts the server if it
+  stops. A restart takes a few seconds (the server re-scores the whole op log at start); writers
+  lose nothing meanwhile, since their editors keep unsent words and send them when it's back, and
+  open pages offer a reload when the code has changed. On `systemctl stop` the server saves first.
+- `deploy/writehaven-backup`, with `deploy/writehaven-backup.service` and `.timer`: a backup of the
+  data directory every 30 minutes, taken while the server runs, to
+  `/var/backups/writehaven/auto-<UTC time>.tar.gz` (root only). It copies `state.json` first and
+  the rest after, so a copy looks like a crash, which the server's start handles; it checks each
+  copy before keeping it, never runs when it would leave less than 1.5 GB free, and never deletes
+  a backup unless `WH_BACKUP_KEEP` is set. Install steps are at the top of the timer.
+- `deploy/check-backup.mjs`: loads a backup (a `.tar.gz` or a data directory) the way the server
+  starts, on a temporary copy, without serving it or sending anything, and says what's in it:
+  `sudo node deploy/check-backup.mjs /var/backups/writehaven/auto-….tar.gz`.
+
+The data directory is everything a party is: the state, the op journal, earlier rounds, uploaded
+images, and `vapid.json`, the Web Push keys (without it, everyone's notifications stop until they
+turn them on again). To restore a backup, or move to another machine:
+
+```sh
+sudo systemctl stop writehaven
+sudo mv /srv/writehaven/data /srv/writehaven/data.before-restore
+sudo tar -xzf /var/backups/writehaven/auto-….tar.gz -C /srv/writehaven   # makes data/
+sudo chown -R writehaven:writehaven /srv/writehaven/data && sudo chmod 700 /srv/writehaven/data
+sudo systemctl start writehaven
+```
+
+Never edit `state.json` while the server runs: it keeps its state in memory and writes the file
+over yours.
+
 ## Tests
 
 ```sh

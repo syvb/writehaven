@@ -1,0 +1,61 @@
+#!/bin/bash
+# A backup of Writehaven's data directory, taken while the server runs (no stop, no restart):
+# deploy/writehaven-backup.timer runs it every 30 minutes; by hand,
+# `sudo systemctl start writehaven-backup`, or run this script as root.
+#
+# Read-only on the live data, at idle priority. state.json is copied before everything else, so
+# the copy looks like a crash (the op journal at least as new as the state), which the server's
+# start-up handles; files being written (*.tmp-*, renamed into place when done) are skipped. The
+# copy is checked (the state parses, the journal is there, the archive reads back) before it is
+# kept as $DEST/auto-<UTC time>.tar.gz, readable by root only.
+#
+# It refuses to run when the disk would get low (the server writes its journal to the same disk,
+# usually), and it never deletes a backup unless WH_BACKUP_KEEP is set.
+#
+# Settings (environment):
+#   WH_BACKUP_DATA         the data directory               (/srv/writehaven/data)
+#   WH_BACKUP_DEST         where backups go                 (/var/backups/writehaven)
+#   WH_BACKUP_MIN_FREE_MB  free space that must remain, MB  (1500)
+#   WH_BACKUP_KEEP         keep only this many auto-* backups, deleting the oldest (unset: keep all)
+#   WH_BACKUP_NODE         the node binary, to check the copy (node)
+set -euo pipefail
+umask 077
+DATA=${WH_BACKUP_DATA:-/srv/writehaven/data}
+DEST=${WH_BACKUP_DEST:-/var/backups/writehaven}
+MIN_FREE_MB=${WH_BACKUP_MIN_FREE_MB:-1500}
+KEEP=${WH_BACKUP_KEEP:-}
+NODE=${WH_BACKUP_NODE:-node}
+
+[[ -f "$DATA/state.json" ]] || { echo "no state.json in $DATA" >&2; exit 1; }
+mkdir -p "$DEST"
+data_mb=$(du -sm "$DATA" | cut -f1)
+free_mb=$(df -Pm "$DEST" | awk 'NR==2 {print $4}')
+if (( free_mb - 2 * data_mb < MIN_FREE_MB )); then
+  echo "skipped: ${free_mb} MB free, data ${data_mb} MB (at least ${MIN_FREE_MB} MB must stay free)" >&2
+  exit 1
+fi
+ts=$(date -u +%Y%m%dT%H%M%SZ)
+stage=$(mktemp -d "$DEST/.stage-XXXXXX")
+trap 'rm -rf --one-file-system "$stage"' EXIT
+mkdir "$stage/data"
+cp -p "$DATA/state.json" "$stage/data/state.json"
+# Then the rest, without the state file and temp files.
+# tar exits 1 when a file changed or vanished while it was read (the journal grows): fine.
+set +e
+tar -C "$DATA" -cf - --anchored --exclude=./state.json --no-anchored --exclude='*.tmp-*' . | tar -C "$stage/data" -xf -
+st=("${PIPESTATUS[@]}")
+set -e
+if (( st[0] > 1 || st[1] != 0 )); then echo "copy failed (tar exit ${st[*]})" >&2; exit 1; fi
+# A backup that can't be read back is no backup.
+"$NODE" -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$stage/data/state.json"
+[[ -d "$stage/data/state.json.ops" ]] || { echo "no op journal in the copy" >&2; exit 1; }
+tar -C "$stage" -czf "$stage/backup.tar.gz" data
+gzip -t "$stage/backup.tar.gz"
+out="$DEST/auto-$ts.tar.gz"
+mv "$stage/backup.tar.gz" "$out"
+removed=0
+if [[ -n "$KEEP" ]] && (( KEEP > 0 )); then
+  mapfile -t old < <(ls -1t "$DEST"/auto-*.tar.gz | tail -n +$((KEEP + 1)))
+  if (( ${#old[@]} )); then rm -f -- "${old[@]}"; removed=${#old[@]}; fi
+fi
+echo "saved $out ($(du -h "$out" | cut -f1)); $(df -Pm "$DEST" | awk 'NR==2 {print $4}') MB free${KEEP:+; $removed old backup(s) removed}"

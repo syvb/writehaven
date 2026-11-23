@@ -1,0 +1,19 @@
+# A backup of the Writehaven data every 30 minutes, at :20 and :50 (away from the top of the
+# hour, when hours on the clock are judged). Install with the script and its service:
+#
+#   sudo install -m 755 deploy/writehaven-backup /usr/local/sbin/writehaven-backup
+#   sudo cp deploy/writehaven-backup.service deploy/writehaven-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now writehaven-backup.timer
+#
+# `journalctl -u writehaven-backup` shows each run; `systemctl list-timers writehaven-backup.timer`
+# the next one.
+[Unit]
+Description=Back up the Writehaven data every 30 minutes
+
+[Timer]
+OnCalendar=*-*-* *:20,50:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

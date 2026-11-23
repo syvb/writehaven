@@ -1,0 +1,58 @@
+# Writehaven as a systemd service. An example: change the paths, the domain and the ports to
+# yours, then
+#
+#   sudo cp deploy/writehaven.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now writehaven
+#
+# It assumes the app in /srv/writehaven, owned by root (the server never writes there), its data
+# in /srv/writehaven/data, owned by the user `writehaven` (useradd --system writehaven), HTTPS
+# served by the app itself with a Let's Encrypt certificate copied to /etc/writehaven/tls (see
+# "HTTPS with Let's Encrypt" in the README), and the HTTP port answering certbot's challenges.
+# Behind a reverse proxy instead: drop the TLS and HTTP-port lines and the capabilities, and
+# listen on 127.0.0.1 and a high port.
+
+[Unit]
+Description=Writehaven (live writing party)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=writehaven
+Group=writehaven
+WorkingDirectory=/srv/writehaven
+ExecStart=/usr/bin/node /srv/writehaven/server.js
+Environment=NODE_ENV=production
+Environment=HOST=::
+Environment=PORT=443
+Environment=WH_HTTP_PORT=80
+Environment=WH_PUBLIC_URL=https://party.example.org
+Environment=WH_STATE_FILE=/srv/writehaven/data/state.json
+Environment=WH_TLS_CERT=/etc/writehaven/tls/fullchain.pem
+Environment=WH_TLS_KEY=/etc/writehaven/tls/privkey.pem
+# Environment=WH_TZ=Europe/London
+# Environment=WH_SETUP_TOKEN=a-long-random-string
+# Ports below 1024 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# The server can write only its data directory.
+ProtectSystem=strict
+ReadWritePaths=/srv/writehaven/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LimitNOFILE=65536
+# On SIGTERM the server saves its state and drains the op journal; at start it re-scores the
+# whole op log, which takes a few seconds with a full party's worth of edits.
+TimeoutStopSec=30
+TimeoutStartSec=300
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

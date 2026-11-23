@@ -1,0 +1,14 @@
+# Runs deploy/writehaven-backup (installed as /usr/local/sbin/writehaven-backup): see the timer.
+[Unit]
+Description=Back up the Writehaven data (read-only on the live data)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/writehaven-backup
+# Environment=WH_BACKUP_DATA=/srv/writehaven/data
+# Environment=WH_BACKUP_DEST=/var/backups/writehaven
+# Environment=WH_BACKUP_KEEP=96
+# Backups for a while only (here, until a given time, in seconds since 1970 UTC):
+# ExecCondition=/bin/sh -c 'test "$(date +%%s)" -lt 1800000000'
+Nice=19
+IOSchedulingClass=idle
