@@ -145,6 +145,24 @@ export function clientIp(req, proxy = null) {
   return net.isIP(cf) ? cf : peer;
 }
 
+// The network an address counts as when connections are counted: an IPv4 address is its own
+// (also when it arrives as ::ffff:a.b.c.d, on a listener for both families); an IPv6 address is
+// its /64, because one home line or phone has a whole /64 of addresses to connect from.
+export function networkOf(addr) {
+  const a = String(addr || '?').replace(/%.*$/, '').toLowerCase(); // without the zone (fe80::1%eth0)
+  if (a.startsWith('::ffff:') && net.isIPv4(a.slice(7))) return a.slice(7);
+  if (!net.isIPv6(a)) return a;
+  const [head, tail] = a.split('::');
+  const groups = head ? head.split(':') : [];
+  if (tail !== undefined) {
+    const rest = tail ? tail.split(':') : [];
+    const restGroups = rest.length + (tail.includes('.') ? 1 : 0); // a dotted ending is two groups
+    while (groups.length + restGroups < 8) groups.push('0');
+    groups.push(...rest);
+  }
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 // Sign-ups per address. A whole room signs up from one address (the venue's Wi-Fi), so
 // successful sign-ups are limited only against floods: `max` per `windowMs` (200 from a network
 // a host is signed in from). Failed attempts (bad input, taken usernames) are limited more
@@ -245,6 +263,8 @@ export function createApp({
   // env WH_SSE_PER_IP, WH_SSE_PER_SESSION, WH_SSE_MAX.
   sseLimits = {},
   maxConnections = 2000, // env WH_MAX_CONNECTIONS
+  maxConnectionsPerIp = null, // env WH_MAX_CONNECTIONS_PER_IP: of them, from one address (default: a quarter)
+  headersTimeoutMs = 10_000, // a connection has this long to send a request's headers (or its TLS handshake)
   fsync = true, // flush each op batch to disk before acking it (env WH_FSYNC=0 turns it off)
   makeWorker = (url, opts) => new Worker(url, opts), // tests simulate a machine out of threads
   fsyncWaitMs = 100, // an op batch's ack waits at most this long for its flush to disk
@@ -1027,6 +1047,15 @@ export function createApp({
       req.resume();
       return sendJson(req, res, 403, { error: 'Forbidden: JSON with the X-WH header required' });
     }
+    if (BIG.has(p)) {
+      // Op batches and paste checks are for approved writers: nobody else gets 4 MB read and parsed.
+      try {
+        party.requireApproved(ctxOf(req).userId);
+      } catch (e) {
+        req.resume();
+        return handleError(req, res, p, e);
+      }
+    }
     let body;
     try {
       body = await readJson(req, BIG.has(p) ? BIG_BODY_LIMIT : BODY_LIMIT);
@@ -1229,11 +1258,47 @@ export function createApp({
       else res.destroy();
     });
   };
+  // A connection that sends no request (or, with TLS, no handshake) is closed after
+  // headersTimeoutMs, so holding one open costs a client more than a silent socket. The clock
+  // starts with the connection and with each request, not while a kept-alive connection idles
+  // between requests (keepAliveTimeout), and an open event stream is a request already made.
+  const checkEvery = Math.min(1_000, headersTimeoutMs);
   // With TLS, the certificate is loaded by start() (and reloaded when it's renewed).
-  const server = tls ? https.createServer({}, onRequest) : http.createServer(onRequest);
+  const server = tls
+    ? https.createServer({ connectionsCheckingInterval: checkEvery, handshakeTimeout: headersTimeoutMs }, onRequest)
+    : http.createServer({ connectionsCheckingInterval: checkEvery }, onRequest);
   server.keepAliveTimeout = 65_000;
   server.maxConnections = maxConnections;
-  server.headersTimeout = 70_000;
+  server.headersTimeout = headersTimeoutMs;
+
+  // One address holds at most perIp of the connections (a quarter, unless set), so no one client
+  // can take them all and shut everyone else out; past that, its new connections are closed at
+  // once. The share is this large because a whole room is one address (the venue's Wi-Fi), and no
+  // larger because a client with IPv4 and IPv6 is two. Connections from this machine aren't
+  // counted: a tunnel or proxy in front carries everyone's.
+  const perIp = maxConnectionsPerIp ?? Math.ceil(maxConnections / 4);
+  const connsByNet = new Map(); // networkOf(address) -> its open connections
+  let refusalLoggedAt = -Infinity;
+  server.on('connection', (socket) => {
+    const peer = socket.remoteAddress;
+    if (LOOPBACK.has(peer)) return;
+    const key = networkOf(peer);
+    const n = connsByNet.get(key) || 0;
+    if (n >= perIp) {
+      socket.destroy();
+      if (now() - refusalLoggedAt >= 60_000) { // one line a minute, whoever it is
+        refusalLoggedAt = now();
+        log.error(`[conn] ${key} has ${n} connections open: more from it are refused (WH_MAX_CONNECTIONS_PER_IP)`);
+      }
+      return;
+    }
+    connsByNet.set(key, n + 1);
+    socket.once('close', () => {
+      const m = connsByNet.get(key) - 1;
+      if (m > 0) connsByNet.set(key, m);
+      else connsByNet.delete(key);
+    });
+  });
 
   const guard = (name, fn) => () => {
     try {
@@ -1359,6 +1424,7 @@ async function main(argv) {
     regLimits: { ...(regMax > 0 ? { max: regMax } : {}), ...(regHostMax > 0 ? { hostMax: regHostMax } : {}), ...(regFailMax > 0 ? { failMax: regFailMax } : {}) },
     sseLimits,
     maxConnections: envInt('WH_MAX_CONNECTIONS') ?? 2000,
+    maxConnectionsPerIp: envInt('WH_MAX_CONNECTIONS_PER_IP') ?? null,
     fsync: process.env.WH_FSYNC !== '0',
     publicUrl: process.env.WH_PUBLIC_URL || undefined,
     tz: process.env.WH_TZ || DEFAULT_TZ,

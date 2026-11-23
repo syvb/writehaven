@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { startApp, client, readSse, sleep, tmpStateFile } from './helpers.js';
 import { hashPassword, verifyPassword, LoginLimiter, parseCookies, sessionCookie } from '../lib/auth.js';
@@ -518,4 +519,108 @@ test('extra routes: registered from outside, tried before /api and static files,
   assert.equal((await fetch(`${base}/u/nope.exe`)).status, 404);
   app.extraRoutes.push({ method: 'GET', match: (p) => (p === '/api/late' ? {} : null), handle: async (req, res, h) => h.sendJson(200, { late: true }) });
   assert.deepEqual(await (await fetch(`${base}/api/late`)).json(), { late: true });
+});
+
+// A raw connection to the app: what came back, and whether it was closed. `from`: the local
+// address to connect from. All of 127/8 is this machine, but the server counts only 127.0.0.1
+// as loopback, so 127.0.0.2 and 127.0.0.3 stand in for two other clients.
+function rawSocket(port, { from = undefined, send = '' } = {}) {
+  const c = { got: '', closed: false, error: null };
+  c.socket = net.connect({ port, host: '127.0.0.1', localAddress: from }, () => send && c.socket.write(send));
+  c.socket.on('data', (d) => { c.got += d; });
+  c.socket.on('error', (e) => { c.error = e; });
+  c.socket.on('close', () => { c.closed = true; });
+  c.status = () => Number(/^HTTP\/1\.1 (\d+)/.exec(c.got)?.[1] ?? 0);
+  return c;
+}
+const GET_HEALTH = 'GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n';
+async function eventually(fn, ms = 5000) {
+  for (let i = 0; i < ms / 20 && !fn(); i++) await sleep(20);
+  return fn();
+}
+
+test('connections: one address holds only its share; other addresses and this machine are still served', async (t) => {
+  const { networkOf } = await import('../server.js');
+  assert.equal(networkOf('203.0.113.9'), '203.0.113.9');
+  assert.equal(networkOf('::ffff:203.0.113.9'), '203.0.113.9', 'IPv4 on a listener for both families');
+  assert.equal(networkOf('2001:db8:1:2:3:4:5:6'), '2001:db8:1:2::/64');
+  assert.equal(networkOf('2001:db8:1:2::9'), '2001:db8:1:2::/64', 'a whole /64 is one client');
+  assert.equal(networkOf('2001:db8:1:3::9'), '2001:db8:1:3::/64');
+  assert.equal(networkOf('2001:db8::7'), '2001:db8:0:0::/64');
+  assert.equal(networkOf('fe80::1%eth0'), 'fe80:0:0:0::/64');
+  assert.equal(networkOf(undefined), '?');
+
+  const errors = [];
+  const { app, close } = await startApp({ maxConnectionsPerIp: 5, log: { error: (...a) => errors.push(a.join(' ')), log() {}, warn() {} } });
+  t.after(close);
+  const port = app.server.address().port;
+  const open = [];
+  t.after(() => { for (const c of open) c.socket.destroy(); });
+  const conn = (from) => {
+    const c = rawSocket(port, { from, send: GET_HEALTH });
+    open.push(c);
+    return c;
+  };
+  const settled = (list) => eventually(() => list.every((c) => c.status() || c.closed));
+  const first = conn('127.0.0.2');
+  await settled([first]);
+  if (first.error?.code === 'EADDRNOTAVAIL') {
+    t.skip('needs a second loopback address (127.0.0.2)');
+    return;
+  }
+  // Eight kept-alive connections from one address: five are served, the rest closed unanswered.
+  const hog = [first, ...Array.from({ length: 7 }, () => conn('127.0.0.2'))];
+  await settled(hog);
+  assert.equal(hog.filter((c) => c.status() === 200 && !c.closed).length, 5);
+  assert.equal(hog.filter((c) => c.closed && !c.got).length, 3);
+  assert.equal(errors.filter((e) => /^\[conn\] 127\.0\.0\.2 has 5 connections open/.test(e)).length, 1, 'logged once, not per refusal');
+  // Another address is served meanwhile, and so is this machine, past the share (a tunnel or proxy).
+  const others = [conn('127.0.0.3'), ...Array.from({ length: 8 }, () => conn('127.0.0.1'))];
+  await settled(others);
+  assert.deepEqual(others.map((c) => c.status()), new Array(9).fill(200));
+  // The share is of connections open now: one closes, the next is served.
+  const held = () => new Promise((resolve) => { app.server.getConnections((e, n) => resolve(n)); });
+  const n = await held();
+  hog.find((c) => !c.closed).socket.destroy();
+  for (let i = 0; i < 250 && (await held()) >= n; i++) await sleep(20);
+  const again = [conn('127.0.0.2'), conn('127.0.0.2')];
+  await settled(again);
+  assert.deepEqual(again.map((c) => c.status()).sort(), [0, 200]);
+});
+
+test('connections: one that sends no request is closed; idle keep-alive connections and open streams stay', async (t) => {
+  const { app, close } = await startApp({ headersTimeoutMs: 300 });
+  t.after(close);
+  const port = app.server.address().port;
+  const silent = rawSocket(port);
+  const half = rawSocket(port, { send: 'GET /healthz HT' });
+  const idle = rawSocket(port, { send: GET_HEALTH });
+  const stream = rawSocket(port, { send: 'GET /api/live/events HTTP/1.1\r\nHost: x\r\n\r\n' });
+  t.after(() => { for (const c of [silent, half, idle, stream]) c.socket.destroy(); });
+  assert.ok(await eventually(() => silent.closed && half.closed), 'closed by the server');
+  assert.equal(silent.status(), 408);
+  await sleep(900); // three timeouts later
+  assert.equal(idle.closed, false, 'between requests the clock isn’t running');
+  assert.equal(stream.closed, false);
+  assert.match(stream.got, /text\/event-stream/);
+  idle.got = '';
+  idle.socket.write(GET_HEALTH);
+  assert.ok(await eventually(() => idle.status() === 200), 'the kept-alive connection answers again');
+});
+
+test('http: op batches and paste checks are refused before their body is read, unless the caller is an approved writer', async (t) => {
+  const { app, base, close } = await startApp({ approvalRequired: true });
+  t.after(close);
+  const port = app.server.address().port;
+  const host = client(base);
+  await host.post('/api/register', { username: 'host', password: 'longpassword', name: 'Host' });
+  const pending = client(base);
+  await pending.post('/api/register', { username: 'ruth', password: 'longpassword', name: 'Ruth' });
+  // 4 MB announced and never sent: the answer can't have waited for it.
+  const announce = (p, cookie = '') => rawSocket(port, { send: `POST ${p} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nX-WH: 1\r\nContent-Length: 4000000\r\n${cookie ? `Cookie: ${cookie}\r\n` : ''}\r\n{"ops":[` });
+  const calls = [announce('/api/ops'), announce('/api/paste/check'), announce('/api/ops', pending.cookie), announce('/api/ops', host.cookie)];
+  t.after(() => { for (const c of calls) c.socket.destroy(); });
+  await eventually(() => calls.slice(0, 3).every((c) => c.status()), 2000);
+  assert.deepEqual(calls.map((c) => c.status()), [401, 401, 403, 0], 'signed out, signed out, waiting for approval; an approved writer’s body is waited for');
+  assert.match(calls[2].got, /"error":"pending_approval"/);
 });
