@@ -4,6 +4,7 @@
 
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -132,17 +133,16 @@ function readJson(req, limit) {
   });
 }
 
-// The client's address. Forwarded headers are believed only from loopback (a reverse proxy or
-// tunnel on this machine); anyone else could put anything in them.
+// The client's address: the connection's own, unless `proxy` (env WH_PROXY) says what is in front.
+// 'cloudflare': a Cloudflare Tunnel on this machine. Cloudflare sets CF-Connecting-IP itself,
+// whatever the visitor sent, and it is believed only from loopback. No other header is ever read:
+// without Cloudflare in front, a visitor can put anything in them.
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-export function clientIp(req) {
+export function clientIp(req, proxy = null) {
   const peer = req.socket.remoteAddress || '?';
-  if (!LOOPBACK.has(peer)) return peer;
-  const cf = req.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim()) return cf.trim().slice(0, 64);
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) return xff.split(',')[0].trim().slice(0, 64);
-  return peer;
+  if (proxy !== 'cloudflare' || !LOOPBACK.has(peer)) return peer;
+  const cf = String(req.headers['cf-connecting-ip'] ?? '').trim();
+  return net.isIP(cf) ? cf : peer;
 }
 
 // Sign-ups per address. A whole room signs up from one address (the venue's Wi-Fi), so
@@ -252,6 +252,8 @@ export function createApp({
   routes = [], // extra routes (see extraRoutes below)
   setupToken = null, // env WH_SETUP_TOKEN: the first account (the host) needs it (/register?setup=<token>)
   hashLimits = {}, // { running, queued, perIp, perHostIp }: password hashing at once (lib/hashgate.js)
+  loginUserLimits = {}, // { max, windowMs }: failed sign-ins per username, whatever the address
+  proxy = null, // env WH_PROXY: 'cloudflare' when a Cloudflare Tunnel on this machine is in front (see clientIp)
   tls = null, // { certFile, keyFile, everyMs? }: serve HTTPS with these PEM files (env WH_TLS_CERT, WH_TLS_KEY; lib/tls.js)
 } = {}) {
   // Streams. Signed-in ones (a writer's own stream, the live page in a signed-in tab) are keyed
@@ -322,14 +324,20 @@ export function createApp({
     return p;
   };
   const saver = createSaver(stateFile, () => party.snapshot(), { delayMs: saveMs, log });
+  const ipOf = (req) => clientIp(req, proxy);
   const limiter = new LoginLimiter({ now });
+  // Failed sign-ins are counted per username too, whatever address they come from: addresses are
+  // cheap to change (a botnet, an IPv6 /64), so the limit per address alone bounds nothing.
+  // 100 per 15 minutes: more than one address can use up (10 per 5 minutes), so nobody at the
+  // venue can lock a person out everywhere, and at most 9,600 guesses a day at an account.
+  const userLimiter = new LoginLimiter({ max: 100, windowMs: 15 * 60_000, now, ...loginUserLimits });
   const hashGate = createHashGate(hashLimits); // bounded scrypt work, 503 busy past it
   // A login try is counted before its (slow) check, so parallel guesses can't all get through;
   // one refused as busy is taken back.
-  const unreserve = (key) => {
-    const l = limiter.fails.get(key);
+  const unreserve = (lim, key) => {
+    const l = lim.fails.get(key);
     if (l) l.pop();
-    if (l && !l.length) limiter.fails.delete(key);
+    if (l && !l.length) lim.fails.delete(key);
   };
   const sameSecret = (given, want) => typeof given === 'string' && given.length > 0
     && crypto.timingSafeEqual(crypto.createHash('sha256').update(given).digest(), crypto.createHash('sha256').update(String(want)).digest());
@@ -617,7 +625,7 @@ export function createApp({
     // Any request with a valid session shows that device was online now (offline back-dating).
     if (userId) party.seen(token);
     req.whCtx = { token: userId ? token : null, userId, user: party.userById(userId) };
-    if (req.whCtx.user?.isAdmin) regLimiter.noteHost(clientIp(req));
+    if (req.whCtx.user?.isAdmin) regLimiter.noteHost(ipOf(req));
     return req.whCtx;
   }
   function startSession(c, userId) {
@@ -678,22 +686,26 @@ export function createApp({
     },
     '/api/login': async (c) => {
       const b = c.body;
-      const username = typeof b.username === 'string' ? b.username.trim().toLowerCase() : '';
+      // (Cut at 64: no username is longer than 24, and the limiters below keep one key per name tried.)
+      const username = typeof b.username === 'string' ? b.username.trim().toLowerCase().slice(0, 64) : '';
       const password = typeof b.password === 'string' ? b.password : '';
       if (!username || !password) throw new HttpError(400, 'Enter your username and password');
       const key = `${c.ip}|${username}`;
-      if (limiter.blocked(key)) throw new HttpError(429, 'Too many failed attempts. Try again in a few minutes.');
+      if (limiter.blocked(key) || userLimiter.blocked(username)) throw new HttpError(429, 'Too many failed attempts. Try again in a few minutes.');
       limiter.fail(key); // reserved now, cleared by the right password
+      userLimiter.fail(username); // ...which takes back only its own try here: the owner signing in gives a guesser no new budget
       const found = party.userByUsername(username);
       let good;
       try {
         good = await hashGate.run(c.ip, () => verifyPassword(password.slice(0, 200), found?.passHash), { host: regLimiter.isHostNetwork(c.ip) });
       } catch (e) {
-        unreserve(key);
+        unreserve(limiter, key);
+        unreserve(userLimiter, username);
         throw e;
       }
       if (!found || !good) throw new HttpError(401, 'Wrong username or password');
       limiter.success(key);
+      unreserve(userLimiter, username);
       party.noteLogin(found);
       startSession(c, found.id);
       return { user: sessionView(found) };
@@ -833,7 +845,7 @@ export function createApp({
             for (const old of theirs.slice(0, Math.max(0, theirs.length - SSE.perUser + 1))) old.res.end();
             return openSse(req, res, liveClients, cl, liveSnapshotBuf());
           }
-          const ip = clientIp(req);
+          const ip = ipOf(req);
           const n = liveByIp.get(ip) || 0;
           if (liveClients.size >= SSE.liveMax || n >= SSE.perIp) {
             res.setHeader('Retry-After', '30');
@@ -1022,7 +1034,7 @@ export function createApp({
       return handleError(req, res, p, e);
     }
     if (pathParams) body = { ...body, ...pathParams };
-    const c = { ...ctxOf(req), body, req, res, ip: clientIp(req) };
+    const c = { ...ctxOf(req), body, req, res, ip: ipOf(req) };
     if (isAdminRoute && !c.user?.isAdmin) return sendJson(req, res, 404, { error: 'Not found' });
     try {
       const out = await route(c);
@@ -1179,7 +1191,7 @@ export function createApp({
       const params = r.match(p);
       if (!params) continue;
       const h = {
-        url, params, ctx: ctxOf(req), clientIp: clientIp(req), party, HttpError,
+        url, params, ctx: ctxOf(req), clientIp: ipOf(req), party, HttpError,
         sendJson: (status, obj) => sendJson(req, res, status, obj),
         sendError: (e) => handleError(req, res, p, e),
       };
@@ -1247,6 +1259,7 @@ export function createApp({
         }, pingMs));
         timers.push(setInterval(() => {
           limiter.sweep();
+          userLimiter.sweep();
           regLimiter.sweep();
         }, 60_000));
         resolve(server.address());
@@ -1337,8 +1350,11 @@ async function main(argv) {
   const tlsCert = process.env.WH_TLS_CERT;
   const tlsKey = process.env.WH_TLS_KEY;
   if (Boolean(tlsCert) !== Boolean(tlsKey)) throw new Error('Set both WH_TLS_CERT and WH_TLS_KEY, or neither');
+  const proxy = String(process.env.WH_PROXY || 'none').trim().toLowerCase();
+  if (proxy !== 'none' && proxy !== 'cloudflare') throw new Error(`WH_PROXY must be "cloudflare" or "none", not "${process.env.WH_PROXY}"`);
   const app = createApp({
     stateFile: stateFilePath(), adminUsers,
+    proxy: proxy === 'cloudflare' ? proxy : null,
     setupToken: process.env.WH_SETUP_TOKEN || null,
     regLimits: { ...(regMax > 0 ? { max: regMax } : {}), ...(regHostMax > 0 ? { hostMax: regHostMax } : {}), ...(regFailMax > 0 ? { failMax: regFailMax } : {}) },
     sseLimits,
@@ -1388,7 +1404,7 @@ async function main(argv) {
     console.log(`[writehaven] http://${host}:${httpPort} · ACME challenges from ${webroot}, everything else to HTTPS`);
   }
   const addr = await app.start(port, host);
-  console.log(`[writehaven] ${tlsCert ? 'https' : 'http'}://${addr.address}:${addr.port} · state ${stateFilePath()} · phase ${app.party.phase}`);
+  console.log(`[writehaven] ${tlsCert ? 'https' : 'http'}://${addr.address}:${addr.port} · state ${stateFilePath()} · phase ${app.party.phase} · client addresses from ${proxy === 'cloudflare' ? 'CF-Connecting-IP (WH_PROXY=cloudflare)' : 'the connection (WH_PROXY=none)'}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

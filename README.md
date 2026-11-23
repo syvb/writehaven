@@ -97,6 +97,7 @@ Everything the server reads from the environment:
 | `WH_TZ` | `Europe/London` | The party clock's time zone: where hours on the clock start, and the times in logs and exports. Screens show each viewer's own local time. |
 | `WH_SETUP_TOKEN` | none | When set, the first account (the host) can only be made through `/register?setup=<token>`, under any username; after that, nobody can sign up under a name in `WH_ADMIN_USERS`. |
 | `WH_ADMIN_USERS` | none | Comma-separated usernames that are hosts: at sign-up, and again at every sign-in. Without `WH_SETUP_TOKEN`, whoever signs up under one of them becomes a host. |
+| `WH_PROXY` | `none` | What is in front of the server, which decides where a client's address comes from. `none`: nothing, the address is the connection's own and no header is read. `cloudflare`: a Cloudflare Tunnel (`cloudflared`) on this machine, the address is `CF-Connecting-IP`, believed only on connections from loopback. |
 | `WH_REG_PER_IP` | `60` | Sign-ups per address per 10 minutes. |
 | `WH_REG_PER_HOST_IP` | `200` | The same from a network a host is signed in from (the venue). |
 | `WH_REG_FAILS_PER_IP` | `30` | Failed sign-up attempts per address per 10 minutes. |
@@ -112,10 +113,13 @@ Everything the server reads from the environment:
 | `WH_HTTP_PORT` | none | With TLS: also listen on this port over plain HTTP, answer Let's Encrypt's HTTP-01 challenges from `acme/` in the state directory, and redirect everything else to HTTPS. |
 
 In production, serve it over HTTPS: by itself, with a Let's Encrypt certificate (below), or
-behind an HTTPS reverse proxy or tunnel on the same machine. Behind a proxy, it takes the
-client's address from `CF-Connecting-IP` or `X-Forwarded-For` only when the connection
-comes from loopback, and marks the session cookie `Secure` when `X-Forwarded-Proto` is `https`.
-Browsers allow Web Push and the service worker only over HTTPS (or on localhost).
+behind a Cloudflare Tunnel on the same machine, with `WH_PROXY=cloudflare`. `WH_PROXY` says where
+a client's address comes from, for the limits per address (sign-ups, anonymous live streams,
+password hashing, failed sign-ins). Another reverse proxy on the machine works too, but all its
+visitors count as one address, 127.0.0.1: `X-Forwarded-For` is never read, because a visitor can
+send it too. Failed sign-ins are also limited per username, whatever the address: 100 per 15
+minutes. The session cookie is marked `Secure` when `X-Forwarded-Proto` is `https`. Browsers allow
+Web Push and the service worker only over HTTPS (or on localhost).
 
 ### HTTPS with Let's Encrypt
 

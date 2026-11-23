@@ -253,8 +253,12 @@ test('persistence: restart restores posts, versions and scores from the state fi
 test('one shared address (the venue): 30 sign-ups, 30 writers’ streams and 10 anonymous live streams all succeed; an abusive address is refused', async (t) => {
   const { RegLimiter, clientIp } = await import('../server.js');
   const req = (peer, headers = {}) => ({ socket: { remoteAddress: peer }, headers });
-  assert.equal(clientIp(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.9' })), '203.0.113.9');
-  assert.equal(clientIp(req('198.51.100.4', { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4' })), '198.51.100.4', 'spoofed headers from outside are ignored');
+  assert.equal(clientIp(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4' })), '127.0.0.1', 'without WH_PROXY no header is read');
+  assert.equal(clientIp(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4' }), 'cloudflare'), '203.0.113.9');
+  assert.equal(clientIp(req('127.0.0.1', { 'cf-connecting-ip': '2001:db8::7' }), 'cloudflare'), '2001:db8::7');
+  assert.equal(clientIp(req('127.0.0.1', { 'x-forwarded-for': '1.2.3.4' }), 'cloudflare'), '127.0.0.1', 'X-Forwarded-For is never read');
+  assert.equal(clientIp(req('127.0.0.1', { 'cf-connecting-ip': '203.0.113.9, 1.2.3.4' }), 'cloudflare'), '127.0.0.1', 'only one address counts as one');
+  assert.equal(clientIp(req('198.51.100.4', { 'cf-connecting-ip': '203.0.113.9' }), 'cloudflare'), '198.51.100.4', 'only the tunnel on this machine is believed');
   let now = 0;
   const lim = new RegLimiter({ now: () => now });
   for (let i = 0; i < 60; i++) assert.equal(lim.take('203.0.113.1'), 0);
@@ -264,7 +268,7 @@ test('one shared address (the venue): 30 sign-ups, 30 writers’ streams and 10 
   now += 10 * 60_000 + 1;
   assert.equal(lim.take('203.0.113.1'), 0, 'the window passes');
 
-  const { base, close, app } = await startApp();
+  const { base, close, app } = await startApp({ proxy: 'cloudflare' }); // each client's address is its CF-Connecting-IP
   t.after(close);
   const ctrls = [];
   t.after(() => { for (const c of ctrls) c.abort(); });
@@ -469,7 +473,7 @@ test('boot removes temp files a crash mid-save left behind', async () => {
 });
 
 test('the account cap never turns away sign-ups from the venue (a network a host is signed in from)', async (t) => {
-  const { base, close } = await startApp();
+  const { base, close } = await startApp({ proxy: 'cloudflare' });
   t.after(close);
   const venue = { 'CF-Connecting-IP': '192.0.2.50' };
   const host = client(base);

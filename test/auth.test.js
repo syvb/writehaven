@@ -1,9 +1,9 @@
-// Sign-in hardening: who becomes a host, parallel guesses and bounded password hashing, signed-in
+// Sign-in hardening: who becomes a host, parallel guesses, guesses from many addresses and bounded password hashing, signed-in
 // live streams that end with their session (and a per-person cap). Plus the sign-up page's party
 // facts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startApp, client, sleep } from './helpers.js';
+import { startApp, client, sleep, makeClock } from './helpers.js';
 import { attachAccounts } from '../lib/accounts.js';
 import { createHashGate } from '../lib/hashgate.js';
 
@@ -58,6 +58,41 @@ test('parallel wrong passwords can’t get past the failed-login limit', async (
   assert.equal((await client(base).post('/api/login', { username: 'ana', password: 'longpassword' })).status, 429);
   // Another username from the same venue isn't affected.
   assert.equal((await client(base).post('/api/login', { username: 'host', password: 'longpassword' })).status, 200);
+});
+
+test('without WH_PROXY no header names the address: forged ones buy no more sign-in guesses', async (t) => {
+  const { base, close } = await startApp();
+  t.after(close);
+  await reg(client(base), 'host');
+  const codes = [];
+  for (let i = 0; i < 12; i++) {
+    const headers = i % 2 ? { 'CF-Connecting-IP': `203.0.113.${i}` } : { 'X-Forwarded-For': `203.0.113.${i}, 198.51.100.7` };
+    codes.push((await client(base).post('/api/login', { username: 'host', password: `guess-${i}` }, { headers })).status);
+  }
+  assert.deepEqual(codes, [...new Array(10).fill(401), 429, 429]);
+});
+
+test('failed sign-ins are limited per username whatever the address; the right password takes back only its own try', async (t) => {
+  // Behind Cloudflare every visitor has their own address, and here a guesser has a new one each time.
+  const clock = makeClock();
+  const { base, close } = await startApp({ proxy: 'cloudflare', loginUserLimits: { max: 12 }, now: clock.now });
+  t.after(close);
+  await reg(client(base), 'host');
+  await reg(client(base), 'ana');
+  let n = 0;
+  const signIn = (username, password) => client(base).post('/api/login', { username, password }, { headers: { 'CF-Connecting-IP': `203.0.113.${++n}` } });
+  const guess = async (times) => {
+    const codes = [];
+    for (let i = 0; i < times; i++) codes.push((await signIn('host', `guess-${n}`)).status);
+    return codes;
+  };
+  assert.deepEqual(await guess(11), new Array(11).fill(401));
+  assert.equal((await signIn('host', 'longpassword')).status, 200, 'below the limit the owner gets in');
+  assert.deepEqual(await guess(3), [401, 429, 429], '12 wrong guesses in all, from 12 addresses: the owner’s sign-in gave no new budget');
+  assert.equal((await signIn('host', 'longpassword')).status, 429, 'the right password waits too');
+  assert.equal((await signIn('ana', 'longpassword')).status, 200, 'another account isn’t affected');
+  clock.advance(15 * 60_000 + 1);
+  assert.equal((await signIn('host', 'longpassword')).status, 200, 'the window passes');
 });
 
 test('password hashing is bounded; past the bound a quick 503 with Retry-After, not counted as a wrong guess', async (t) => {

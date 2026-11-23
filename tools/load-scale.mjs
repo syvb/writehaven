@@ -37,7 +37,7 @@ const now = () => Date.now();
 const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-scale-'));
 const server = spawn(process.execPath, ['server.js'], {
   cwd: ROOT,
-  env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', WH_STATE_FILE: path.join(stateDir, 'state.json') },
+  env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', WH_PROXY: 'cloudflare', WH_STATE_FILE: path.join(stateDir, 'state.json') }, // CF-Connecting-IP gives each client its address
   stdio: ['ignore', 'ignore', 'pipe'],
 });
 let serverErr = '';
