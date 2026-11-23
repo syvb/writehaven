@@ -172,13 +172,15 @@ export class RegLimiter {
     Object.assign(this, { max, hostMax, failMax, hostFailMax, windowMs, now });
     this.hits = new Map(); // ip -> [t...] successful sign-ups
     this.fails = new Map(); // ip -> [t...] failed attempts
-    this.hostIps = new Map(); // ip -> last time a host was seen there
+    this.hostIps = new Map(); // networkOf(ip) -> last time a host was seen there
   }
+  // The host's network: an IPv4 address (the venue's Wi-Fi is one), or an IPv6 /64 (each device
+  // there has its own address in it), as networkOf() counts connections.
   noteHost(ip) {
-    this.hostIps.set(ip, this.now());
+    this.hostIps.set(networkOf(ip), this.now());
   }
   isHostNetwork(ip) {
-    const h = this.hostIps.get(ip);
+    const h = this.hostIps.get(networkOf(ip));
     return h !== undefined && this.now() - h < 12 * 3600_000;
   }
   limitFor(ip) {
@@ -1263,25 +1265,33 @@ export function createApp({
   // starts with the connection and with each request, not while a kept-alive connection idles
   // between requests (keepAliveTimeout), and an open event stream is a request already made.
   const checkEvery = Math.min(1_000, headersTimeoutMs);
+  const serverOptions = { connectionsCheckingInterval: checkEvery }; // for every listener (guardServer)
   // With TLS, the certificate is loaded by start() (and reloaded when it's renewed).
   const server = tls
-    ? https.createServer({ connectionsCheckingInterval: checkEvery, handshakeTimeout: headersTimeoutMs }, onRequest)
-    : http.createServer({ connectionsCheckingInterval: checkEvery }, onRequest);
+    ? https.createServer({ ...serverOptions, handshakeTimeout: headersTimeoutMs }, onRequest)
+    : http.createServer(serverOptions, onRequest);
   server.keepAliveTimeout = 65_000;
-  server.maxConnections = maxConnections;
-  server.headersTimeout = headersTimeoutMs;
 
   // One address holds at most perIp of the connections (a quarter, unless set), so no one client
   // can take them all and shut everyone else out; past that, its new connections are closed at
   // once. The share is this large because a whole room is one address (the venue's Wi-Fi), and no
   // larger because a client with IPv4 and IPv6 is two. Connections from this machine aren't
-  // counted: a tunnel or proxy in front carries everyone's.
+  // counted: a tunnel or proxy in front carries everyone's. Nor is the host's network (the venue,
+  // where a host is signed in): everyone there is trusted, and a big room is one address.
+  // guardServer() puts these limits on a listener: this server, and the plain-HTTP one in front
+  // of it (redirects and certificate challenges, main()), which share the counts per address.
   const perIp = maxConnectionsPerIp ?? Math.ceil(maxConnections / 4);
-  const connsByNet = new Map(); // networkOf(address) -> its open connections
+  const connsByNet = new Map(); // networkOf(address) -> its open connections, on every listener
   let refusalLoggedAt = -Infinity;
-  server.on('connection', (socket) => {
+  const guardServer = (srv) => {
+    srv.maxConnections = maxConnections;
+    srv.headersTimeout = headersTimeoutMs;
+    srv.on('connection', (socket) => onConnection(socket));
+    return srv;
+  };
+  const onConnection = (socket) => {
     const peer = socket.remoteAddress;
-    if (LOOPBACK.has(peer)) return;
+    if (LOOPBACK.has(peer) || regLimiter.isHostNetwork(peer)) return;
     const key = networkOf(peer);
     const n = connsByNet.get(key) || 0;
     if (n >= perIp) {
@@ -1298,7 +1308,8 @@ export function createApp({
       if (m > 0) connsByNet.set(key, m);
       else connsByNet.delete(key);
     });
-  });
+  };
+  guardServer(server);
 
   const guard = (name, fn) => () => {
     try {
@@ -1353,7 +1364,7 @@ export function createApp({
 
   // Open event streams (tests and diagnostics).
   const streams = () => ({ live: liveClients.size, me: meClients.size, meOf: (uid) => [...meClients].filter((x) => x.userId === uid).length });
-  return { server, party, saver, start, stop, liveTick, meTick, meSend, streams, extraRoutes, liveClientsForTest: liveClients, hashGate, closeStreamsOf };
+  return { server, party, saver, start, stop, liveTick, meTick, meSend, streams, extraRoutes, liveClientsForTest: liveClients, hashGate, closeStreamsOf, guardServer, serverOptions };
 }
 
 // ----------------------------------------------------------------------- CLI
@@ -1462,7 +1473,8 @@ async function main(argv) {
     // Let's Encrypt's HTTP-01 challenges (certbot --webroot), and HTTP to HTTPS redirects.
     const webroot = path.join(path.dirname(stateFilePath()), 'acme');
     fs.mkdirSync(webroot, { recursive: true });
-    const acme = createAcmeServer({ webroot, httpsPort: port });
+    // The same connection limits as the HTTPS server, per address counted across both.
+    const acme = app.guardServer(createAcmeServer({ webroot, httpsPort: port, serverOptions: app.serverOptions }));
     await new Promise((resolve, reject) => {
       acme.once('error', reject);
       acme.listen(httpPort, host, resolve);

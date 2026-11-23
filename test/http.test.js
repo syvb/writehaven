@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
+import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { startApp, client, readSse, sleep, tmpStateFile } from './helpers.js';
 import { hashPassword, verifyPassword, LoginLimiter, parseCookies, sessionCookie } from '../lib/auth.js';
@@ -623,4 +625,84 @@ test('http: op batches and paste checks are refused before their body is read, u
   await eventually(() => calls.slice(0, 3).every((c) => c.status()), 2000);
   assert.deepEqual(calls.map((c) => c.status()), [401, 401, 403, 0], 'signed out, signed out, waiting for approval; an approved writer’s body is waited for');
   assert.match(calls[2].got, /"error":"pending_approval"/);
+});
+
+test('the host’s network is an IPv4 address or an IPv6 /64, and it doesn’t count towards a connection share', async (t) => {
+  const { RegLimiter } = await import('../server.js');
+  const r = new RegLimiter();
+  r.noteHost('2001:db8:1:2::5');
+  assert.equal(r.isHostNetwork('2001:db8:1:2::9'), true, 'another device at the venue, same /64');
+  assert.equal(r.isHostNetwork('2001:db8:1:3::9'), false);
+  r.noteHost('::ffff:203.0.113.9');
+  assert.equal(r.isHostNetwork('203.0.113.9'), true, 'IPv4, however the listener reports it');
+  assert.equal(r.isHostNetwork('203.0.113.10'), false);
+
+  const { app, close, base } = await startApp({ maxConnectionsPerIp: 3 });
+  t.after(close);
+  const port = app.server.address().port;
+  const open = [];
+  t.after(() => { for (const c of open) c.socket.destroy(); });
+  const conn = (from) => {
+    const c = rawSocket(port, { from, send: GET_HEALTH });
+    open.push(c);
+    return c;
+  };
+  const settled = (list) => eventually(() => list.every((c) => c.status() || c.closed));
+  const probe = conn('127.0.0.4');
+  await settled([probe]);
+  if (probe.error?.code === 'EADDRNOTAVAIL') {
+    t.skip('needs more loopback addresses (127.0.0.4)');
+    return;
+  }
+  probe.socket.destroy();
+  // A host signs in, then shows up from 127.0.0.4: that address is the venue now.
+  const host = client(base);
+  await host.post('/api/register', { username: 'host', password: 'longpassword', name: 'Host' });
+  const seen = await new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/api/session', localAddress: '127.0.0.4', headers: { Cookie: host.cookie } }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject);
+  });
+  assert.equal(seen, 200);
+  // Eight connections from the venue are all served; eight from elsewhere get the share of three.
+  const venue = Array.from({ length: 8 }, () => conn('127.0.0.4'));
+  const elsewhere = Array.from({ length: 8 }, () => conn('127.0.0.5'));
+  await settled([...venue, ...elsewhere]);
+  assert.deepEqual(venue.map((c) => c.status()), new Array(8).fill(200));
+  assert.equal(elsewhere.filter((c) => c.status() === 200).length, 3);
+});
+
+test('the plain-HTTP listener in front (redirects, certificate challenges) has the same connection limits', async (t) => {
+  const { createAcmeServer } = await import('../lib/tls.js');
+  const { app, close } = await startApp({ maxConnectionsPerIp: 3, headersTimeoutMs: 300 });
+  t.after(close);
+  const webroot = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-acme-'));
+  const acme = app.guardServer(createAcmeServer({ webroot, httpsPort: 443, serverOptions: app.serverOptions }));
+  await new Promise((resolve) => acme.listen(0, '127.0.0.1', resolve));
+  const port = acme.address().port;
+  const open = [];
+  t.after(() => {
+    for (const c of open) c.socket.destroy();
+    acme.close();
+    fs.rmSync(webroot, { recursive: true, force: true });
+  });
+  const conn = (from, send = 'GET / HTTP/1.1\r\nHost: party.example.org\r\n\r\n') => {
+    const c = rawSocket(port, { from, send });
+    open.push(c);
+    return c;
+  };
+  const probe = conn('127.0.0.2');
+  await eventually(() => probe.status() || probe.closed);
+  if (probe.error?.code === 'EADDRNOTAVAIL') {
+    t.skip('needs a second loopback address (127.0.0.2)');
+    return;
+  }
+  assert.equal(probe.status(), 301, 'redirects to HTTPS');
+  // A connection that sends nothing is closed, as on the HTTPS port.
+  const silent = conn('127.0.0.3', '');
+  assert.ok(await eventually(() => silent.closed), 'closed by the server');
+  // One address holds only its share here too (the probe is one of its three).
+  const more = Array.from({ length: 4 }, () => conn('127.0.0.2'));
+  await eventually(() => more.every((c) => c.status() || c.closed));
+  assert.equal(more.filter((c) => c.status() === 301).length, 2);
+  assert.equal(more.filter((c) => c.closed && !c.got).length, 2);
 });

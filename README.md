@@ -105,7 +105,7 @@ Everything the server reads from the environment:
 | `WH_SSE_PER_SESSION` | `4` | Streams of each kind per signed-in session (the oldest closes). |
 | `WH_SSE_MAX` | `2000` | Live-page streams in all; past it, anonymous ones are refused. |
 | `WH_MAX_CONNECTIONS` | `2000` | Open connections the server accepts. |
-| `WH_MAX_CONNECTIONS_PER_IP` | a quarter of them | Open connections from one address (an IPv6 address counts as its /64); more from it are closed at once. A whole room shares the venue's address: raise it for a very large one. Connections from this machine (a tunnel or proxy in front) aren't counted. |
+| `WH_MAX_CONNECTIONS_PER_IP` | a quarter of them | Open connections from one address (an IPv6 address counts as its /64), on the HTTPS port and `WH_HTTP_PORT` together; more from it are closed at once. Not counted: connections from this machine (a tunnel or proxy in front), and from the host's network, where a host is signed in (the venue, trusted). |
 | `WH_FSYNC` | on | `0`: don't flush each batch of edits to disk before acknowledging it. |
 | `WH_HOUR_MIN` | none | Hour length in minutes, for testing. |
 | `WH_TEST_KNOBS` | none | `1`: the host may change test-only settings. |
@@ -120,8 +120,9 @@ password hashing, failed sign-ins). Another reverse proxy on the machine works t
 visitors count as one address, 127.0.0.1: `X-Forwarded-For` is never read, because a visitor can
 send it too. Failed sign-ins are also limited per username, whatever the address: 100 per 15
 minutes. A connection that sends no request within 10 seconds is closed, and one address holds at
-most a quarter of the connections (`WH_MAX_CONNECTIONS_PER_IP`); against a flood from many
-addresses, put Cloudflare in front. The session cookie is marked `Secure` when `X-Forwarded-Proto`
+most a quarter of the connections (`WH_MAX_CONNECTIONS_PER_IP`), except the host's network: an
+address (IPv6: a /64) a host is signed in from, which also gets the larger sign-up allowance.
+`WH_HTTP_PORT` has the same limits. Against a flood from many addresses, put Cloudflare in front. The session cookie is marked `Secure` when `X-Forwarded-Proto`
 is `https`. Browsers allow Web Push and the service worker only over HTTPS (or on localhost).
 
 ### HTTPS with Let's Encrypt
